@@ -221,9 +221,9 @@ contract VolatilityDynamicFeeHookTest is Test {
             hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
         }
 
-        // price history should be capped at HISTORY_SIZE
+        // With ring buffer capacity of 100, all 16 observations (1 initial + 15 swaps) should be stored
         uint160[] memory prices = hook.getPriceHistory(key);
-        assertEq(prices.length, 10, "Price history should be capped at HISTORY_SIZE");
+        assertEq(prices.length, 16, "Price history should contain all 16 observations");
     }
 
     function test_volatility_withZeroPrice_skipped() public {
@@ -385,123 +385,4 @@ contract VolatilityDynamicFeeHookTest is Test {
         assertLe(fee, 5000, "Fee should not exceed MAX_FEE");
     }
 
-    function test_priceChangeLimit_rejectsExcessiveChange() public {
-        // Test that price changes exceeding MAX_PRICE_CHANGE_BPS (50%) are rejected
-        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
-        uint160 basePrice = uint160(1 << 96);
-
-        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(slot);
-
-        vm.prank(address(manager));
-        hook.afterInitialize(address(this), key, basePrice, int24(0));
-
-        SwapParams memory params = SwapParams(true, 1000, 0);
-
-        // First normal swap
-        // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
-        uint160 normalPrice = basePrice + uint160((basePrice * 10) / 100); // +10%
-        bytes32 normalSlot = encodeSlot0(normalPrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(normalSlot);
-        vm.prank(address(manager));
-        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-
-        // Try to apply a 60% price increase (exceeds 50% limit)
-        skip(1 hours);
-        uint160 excessivePrice = normalPrice + uint160((normalPrice * 60) / 100); // +60%
-        bytes32 excessiveSlot = encodeSlot0(excessivePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(excessiveSlot);
-
-        // Expect revert with PriceChangeExceedsLimit
-        vm.expectRevert(VolatilityDynamicFeeHook.PriceChangeExceedsLimit.selector);
-        vm.prank(address(manager));
-        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-    }
-
-    function test_priceChangeLimit_allowsWithinLimit() public {
-        // Test that price changes within MAX_PRICE_CHANGE_BPS (50%) are allowed
-        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
-        uint160 basePrice = uint160(1 << 96);
-
-        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(slot);
-
-        vm.prank(address(manager));
-        hook.afterInitialize(address(this), key, basePrice, int24(0));
-
-        SwapParams memory params = SwapParams(true, 1000, 0);
-
-        // Apply a 40% price increase (within 50% limit)
-        // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
-        uint160 validPrice = basePrice + uint160((basePrice * 40) / 100); // +40%
-        bytes32 validSlot = encodeSlot0(validPrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(validSlot);
-
-        // Should succeed without reverting
-        vm.prank(address(manager));
-        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-
-        // Verify price was recorded
-        uint160[] memory prices = hook.getPriceHistory(key);
-        assertEq(prices.length, 2, "Should have 2 prices");
-        assertEq(prices[1], validPrice, "Second price should be the valid price");
-    }
-
-    function test_priceChangeLimit_exactlyAtLimit() public {
-        // Test edge case: exactly 50% price change
-        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
-        uint160 basePrice = uint160(1 << 96);
-
-        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(slot);
-
-        vm.prank(address(manager));
-        hook.afterInitialize(address(this), key, basePrice, int24(0));
-
-        SwapParams memory params = SwapParams(true, 1000, 0);
-
-        // Apply exactly 50% price increase (at the limit)
-        // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
-        uint160 limitPrice = basePrice + uint160((basePrice * 50) / 100); // +50%
-        bytes32 limitSlot = encodeSlot0(limitPrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(limitSlot);
-
-        // Should succeed (at limit, not exceeding)
-        vm.prank(address(manager));
-        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-
-        // Verify price was recorded
-        uint160[] memory prices = hook.getPriceHistory(key);
-        assertEq(prices.length, 2, "Should have 2 prices");
-        assertEq(prices[1], limitPrice, "Second price should be the limit price");
-    }
-
-    function test_priceChangeLimit_negativeChange() public {
-        // Test that large negative price changes are also rejected
-        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
-        uint160 basePrice = uint160(1 << 96);
-
-        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(slot);
-
-        vm.prank(address(manager));
-        hook.afterInitialize(address(this), key, basePrice, int24(0));
-
-        SwapParams memory params = SwapParams(true, 1000, 0);
-
-        // Try to apply a 60% price decrease (exceeds 50% limit)
-        // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
-        uint160 decreasedPrice = basePrice - uint160((basePrice * 60) / 100); // -60%
-        bytes32 decreasedSlot = encodeSlot0(decreasedPrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(decreasedSlot);
-
-        // Expect revert with PriceChangeExceedsLimit
-        vm.expectRevert(VolatilityDynamicFeeHook.PriceChangeExceedsLimit.selector);
-        vm.prank(address(manager));
-        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-    }
 }

@@ -11,6 +11,8 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {ObservationLibrary} from "./libraries/ObservationLibrary.sol";
+import {BollingerBands} from "./libraries/BollingerBands.sol";
 
 /// @title VolatilityDynamicFeeHook
 /// @notice ボラティリティに基づいて動的に手数料を調整するUniswap v4 Hook
@@ -23,18 +25,12 @@ contract VolatilityDynamicFeeHook is BaseHook {
     // エラー定義
     error MustUseDynamicFee();
     error PriceChangeExceedsLimit();
+    error InsufficientObservations();
 
-    // 過去の価格履歴を保持するための構造体
-    struct PriceHistory {
-        uint160[] prices;
-        uint256[] timestamps;
-        uint256 index;
-        uint256 count;
-        uint256 lastUpdateTime;
-    }
-
-    // プールごとの価格履歴
-    mapping(PoolId => PriceHistory) public poolPriceHistory;
+    // プールごとの状態管理
+    mapping(PoolId => ObservationLibrary.RingBuffer) public observations;
+    mapping(PoolId => BollingerBands.Config) public bbConfig;
+    mapping(PoolId => uint256) public lastRebalanceTime;
 
     // 設定パラメータ（USDC/JPYC = USD/JPY為替ペア向け最適化）
     // USDC/JPYCは実質的にドル円レートを反映するため、通常の為替ボラティリティ（0.5-1.5%/日）を想定
@@ -44,6 +40,23 @@ contract VolatilityDynamicFeeHook is BaseHook {
     uint256 public constant VOLATILITY_THRESHOLD = 500; // ボラティリティの閾値
     uint256 public constant MIN_UPDATE_INTERVAL = 1 hours; // Codex版: 1時間間隔で観測を記録
     uint256 public constant MAX_PRICE_CHANGE_BPS = 5000; // 最大価格変動 50% (5000 = 50%)
+    uint256 public constant REBALANCE_COOLDOWN = 2 hours; // リバランスのクールダウン期間
+
+    // イベント定義
+    event RebalanceTriggered(
+        PoolId indexed poolId,
+        int24 upperBand,
+        int24 middleBand,
+        int24 lowerBand,
+        bool isAbove
+    );
+
+    event ObservationRecorded(
+        PoolId indexed poolId,
+        uint256 timestamp,
+        uint160 sqrtPriceX96,
+        uint256 observationCount
+    );
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
 
@@ -77,17 +90,26 @@ contract VolatilityDynamicFeeHook is BaseHook {
         // Dynamic Feeが有効か確認
         if (!key.fee.isDynamicFee()) revert MustUseDynamicFee();
 
-        // 初期価格を履歴に追加
         PoolId poolId = key.toId();
 
-        // 履歴配列の初期化
-        poolPriceHistory[poolId].prices = new uint160[](HISTORY_SIZE);
-        poolPriceHistory[poolId].timestamps = new uint256[](HISTORY_SIZE);
-        poolPriceHistory[poolId].prices[0] = sqrtPriceX96;
-        poolPriceHistory[poolId].timestamps[0] = block.timestamp;
-        poolPriceHistory[poolId].index = 1;
-        poolPriceHistory[poolId].count = 1;
-        poolPriceHistory[poolId].lastUpdateTime = block.timestamp;
+        // Bollinger Bands設定を初期化
+        bbConfig[poolId] = BollingerBands.Config({
+            period: 24,              // 24時間（24個の観測）
+            standardDeviation: 200,  // 2.0σ
+            timeframe: 86400,        // 24時間（秒）
+            softBandBps: 180         // 1.8σ
+        });
+
+        // 初期観測を追加
+        ObservationLibrary.push(
+            observations[poolId],
+            block.timestamp,
+            sqrtPriceX96
+        );
+
+        lastRebalanceTime[poolId] = block.timestamp;
+
+        emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, 1);
 
         return BaseHook.afterInitialize.selector;
     }
@@ -120,53 +142,45 @@ contract VolatilityDynamicFeeHook is BaseHook {
         bytes calldata
     ) internal override returns (bytes4, int128) {
         PoolId poolId = key.toId();
-        // 履歴を取得
-        PriceHistory storage history = poolPriceHistory[poolId];
 
-        // 最短更新間隔をチェック（Checks）
-        if (history.lastUpdateTime != 0 && block.timestamp < history.lastUpdateTime + MIN_UPDATE_INTERVAL) {
-            return (BaseHook.afterSwap.selector, 0);
-        }
-
-        // Effects: インデックス/カウント/タイムスタンプを先に更新して再入を防ぐ
-        uint256 writeIndex = history.index;
-        history.index = (history.index + 1) % HISTORY_SIZE;
-        if (history.count < HISTORY_SIZE) {
-            history.count++;
-        }
-        history.lastUpdateTime = block.timestamp;
-
-        // Interactions: 必要な外部呼び出しは最後に行う
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
-
-        // 価格変動の検証（異常値フィルタ）
-        if (history.count > 0) {
-            uint256 prevIndex = writeIndex == 0 ? HISTORY_SIZE - 1 : writeIndex - 1;
-            uint160 previousPrice = history.prices[prevIndex];
-
-            // 前回の価格が存在し、かつゼロでない場合に検証
-            if (previousPrice > 0) {
-                uint256 cur = uint256(sqrtPriceX96);
-                uint256 prev = uint256(previousPrice);
-                uint256 priceChange;
-
-                // 価格変動率を計算（bps単位）
-                if (cur > prev) {
-                    priceChange = ((cur - prev) * 10000) / prev;
-                } else {
-                    priceChange = ((prev - cur) * 10000) / prev;
-                }
-
-                // 価格変動が上限を超える場合はrevert
-                if (priceChange > MAX_PRICE_CHANGE_BPS) {
-                    revert PriceChangeExceedsLimit();
-                }
+        // 最小更新間隔チェック（1時間）
+        ObservationLibrary.RingBuffer storage obs = observations[poolId];
+        if (obs.count > 0) {
+            uint256 lastIndex = (obs.index + 99) % 100;
+            uint256 lastTimestamp = obs.data[lastIndex].timestamp;
+            if (block.timestamp < lastTimestamp + MIN_UPDATE_INTERVAL) {
+                return (BaseHook.afterSwap.selector, 0);
             }
         }
 
-        // 価格とタイムスタンプを記録
-        history.prices[writeIndex] = sqrtPriceX96;
-        history.timestamps[writeIndex] = block.timestamp;
+        // 現在価格を取得
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+
+        // 観測を追加
+        ObservationLibrary.push(obs, block.timestamp, sqrtPriceX96);
+
+        emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
+
+        // BB計算が可能か確認（24個以上の観測が必要）
+        if (obs.count >= bbConfig[poolId].period) {
+            // Bollinger Bandsを計算
+            BollingerBands.Bands memory bands = BollingerBands.calculate(
+                obs,
+                bbConfig[poolId]
+            );
+
+            // 現在価格がバンド外かチェック
+            int24 currentTick = _getCurrentTick(poolId);
+            (bool isOutside, bool isAbove) = BollingerBands.isOutOfBands(
+                currentTick,
+                bands
+            );
+
+            // バンド外の場合、リバランスをトリガー
+            if (isOutside) {
+                _triggerRebalance(poolId, bands, isAbove);
+            }
+        }
 
         return (BaseHook.afterSwap.selector, 0);
     }
@@ -176,8 +190,8 @@ contract VolatilityDynamicFeeHook is BaseHook {
     /// @return volatility ボラティリティ（0-100のスケール）
     /// @dev 時間重み付きで価格変動を計算することで、フロントラン攻撃耐性を向上
     function _calculateVolatility(PoolId poolId) internal view returns (uint256) {
-        PriceHistory storage history = poolPriceHistory[poolId];
-        uint256 count = history.count;
+        ObservationLibrary.RingBuffer storage obs = observations[poolId];
+        uint256 count = obs.count;
 
         // 履歴が2つ未満の場合は低ボラティリティとみなす
         if (count < 2) {
@@ -187,37 +201,35 @@ contract VolatilityDynamicFeeHook is BaseHook {
         // 時間重み付き価格変動率の合計を計算
         uint256 weightedVariation = 0;
         uint256 totalWeight = 0;
-        uint256 currentIndex = history.index == 0 ? HISTORY_SIZE - 1 : history.index - 1;
+        uint256 currentIndex = obs.index == 0 ? 99 : obs.index - 1;
 
         for (uint256 i = 1; i < count; i++) {
-            uint160 currentPrice = history.prices[currentIndex];
-            uint256 currentTime = history.timestamps[currentIndex];
+            ObservationLibrary.Observation storage current = obs.data[currentIndex];
 
             // ひとつ前のインデックスを計算
-            uint256 prevIndex = currentIndex == 0 ? HISTORY_SIZE - 1 : currentIndex - 1;
-            uint160 previousPrice = history.prices[prevIndex];
-            uint256 previousTime = history.timestamps[prevIndex];
+            uint256 prevIndex = currentIndex == 0 ? 99 : currentIndex - 1;
+            ObservationLibrary.Observation storage previous = obs.data[prevIndex];
 
-            // previousPrice が 0 の場合はスキップしてゼロ除算を防ぐ
-            if (previousPrice == 0 || currentTime <= previousTime) {
+            // previousSqrtPrice が 0 の場合はスキップしてゼロ除算を防ぐ
+            if (previous.sqrtPriceX96 == 0 || current.timestamp <= previous.timestamp) {
                 currentIndex = prevIndex;
                 continue;
             }
 
             // 時間の重み: 時間差を使用（短時間の変動ほど重要度を下げる）
-            uint256 timeDelta = currentTime - previousTime;
+            uint256 timeDelta = current.timestamp - previous.timestamp;
 
             // 最小重みを1に設定（ゼロ除算防止）
             uint256 weight = timeDelta > 0 ? timeDelta : 1;
 
-            // 変動を計算（絶対値） - uint256 にキャストして安全に計算
-            uint256 cur = uint256(currentPrice);
-            uint256 prev = uint256(previousPrice);
+            // sqrtPriceX96を使って変動を計算（絶対値）
+            uint256 curSqrt = uint256(current.sqrtPriceX96);
+            uint256 prevSqrt = uint256(previous.sqrtPriceX96);
             uint256 variation;
-            if (cur > prev) {
-                variation = ((cur - prev) * 10000) / prev;
+            if (curSqrt > prevSqrt) {
+                variation = ((curSqrt - prevSqrt) * 10000) / prevSqrt;
             } else {
-                variation = ((prev - cur) * 10000) / prev;
+                variation = ((prevSqrt - curSqrt) * 10000) / prevSqrt;
             }
 
             // 時間重み付き変動を加算
@@ -277,18 +289,61 @@ contract VolatilityDynamicFeeHook is BaseHook {
     /// @return 価格履歴の配列
     function getPriceHistory(PoolKey calldata key) external view returns (uint160[] memory) {
         // リングバッファから時系列順に並べ替えて返す
-        PriceHistory storage history = poolPriceHistory[key.toId()];
-        uint256 count = history.count;
+        ObservationLibrary.RingBuffer storage obs = observations[key.toId()];
+        uint256 count = obs.count;
         uint160[] memory sortedPrices = new uint160[](count);
-        
+
         if (count > 0) {
-            uint256 currentIdx = history.index == 0 ? HISTORY_SIZE - 1 : history.index - 1;
+            uint256 currentIdx = obs.index == 0 ? 99 : obs.index - 1;
             for (uint256 i = 0; i < count; i++) {
-                sortedPrices[count - 1 - i] = history.prices[currentIdx];
-                currentIdx = currentIdx == 0 ? HISTORY_SIZE - 1 : currentIdx - 1;
+                sortedPrices[count - 1 - i] = obs.data[currentIdx].sqrtPriceX96;
+                currentIdx = currentIdx == 0 ? 99 : currentIdx - 1;
             }
         }
-        
+
         return sortedPrices;
+    }
+
+    /// @notice Get current tick for pool
+    /// @param poolId プールID
+    /// @return 現在のtick値
+    function _getCurrentTick(PoolId poolId) internal view returns (int24) {
+        (, int24 tick,,) = poolManager.getSlot0(poolId);
+        return tick;
+    }
+
+    /// @notice Trigger rebalance when price is out of bands
+    /// @dev Emits event for off-chain keeper to execute rebalance
+    /// @param poolId プールID
+    /// @param bands Bollinger Bandsの計算結果
+    /// @param isAbove 価格が上限を超えている場合true
+    function _triggerRebalance(
+        PoolId poolId,
+        BollingerBands.Bands memory bands,
+        bool isAbove
+    ) internal {
+        // Check cooldown period (2 hours)
+        if (block.timestamp < lastRebalanceTime[poolId] + REBALANCE_COOLDOWN) {
+            return;
+        }
+
+        lastRebalanceTime[poolId] = block.timestamp;
+
+        // Emit event for keeper
+        emit RebalanceTriggered(poolId, bands.upper, bands.middle, bands.lower, isAbove);
+    }
+
+    /// @notice Get Bollinger Bands for pool
+    /// @param poolId プールID
+    /// @return bands Bollinger Bandsの計算結果
+    function getBollingerBands(PoolId poolId)
+        external
+        view
+        returns (BollingerBands.Bands memory)
+    {
+        if (observations[poolId].count < bbConfig[poolId].period) {
+            revert InsufficientObservations();
+        }
+        return BollingerBands.calculate(observations[poolId], bbConfig[poolId]);
     }
 }
