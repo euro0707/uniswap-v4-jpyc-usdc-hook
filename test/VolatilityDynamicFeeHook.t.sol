@@ -25,7 +25,7 @@ contract MockPoolManager {
 }
 
 contract TestHook is VolatilityDynamicFeeHook {
-    constructor(IPoolManager m) VolatilityDynamicFeeHook(m) {}
+    constructor(IPoolManager m, address owner) VolatilityDynamicFeeHook(m, owner) {}
 
     // override the internal validation to disable permission check during tests
     function validateHookAddress(BaseHook) internal pure override {}
@@ -38,7 +38,7 @@ contract VolatilityDynamicFeeHookTest is Test {
     function setUp() public {
         manager = new MockPoolManager();
         // deploy test hook with the manager address
-        TestHook t = new TestHook(IPoolManager(address(manager)));
+        TestHook t = new TestHook(IPoolManager(address(manager)), address(this));
         hook = VolatilityDynamicFeeHook(address(t));
     }
 

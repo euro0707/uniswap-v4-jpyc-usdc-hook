@@ -13,7 +13,7 @@ import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 
 /// @notice Test hook that bypasses address validation
 contract TestHook is VolatilityDynamicFeeHook {
-    constructor(IPoolManager m) VolatilityDynamicFeeHook(m) {}
+    constructor(IPoolManager m, address owner) VolatilityDynamicFeeHook(m, owner) {}
 
     // override the internal validation to disable permission check during tests
     function validateHookAddress(BaseHook) internal pure override {}
@@ -46,7 +46,7 @@ contract ForkTest is Test {
         poolManager = IPoolManager(address(mockManager));
 
         // Hookをデプロイ（TestHookを使用してアドレス検証をバイパス）
-        TestHook t = new TestHook(poolManager);
+        TestHook t = new TestHook(poolManager, address(this));
         hook = VolatilityDynamicFeeHook(address(t));
 
         assertEq(address(hook.poolManager()), address(poolManager));
@@ -57,7 +57,7 @@ contract ForkTest is Test {
         // Setup
         MockPoolManager mockManager = new MockPoolManager();
         poolManager = IPoolManager(address(mockManager));
-        TestHook t = new TestHook(poolManager);
+        TestHook t = new TestHook(poolManager, address(this));
         hook = VolatilityDynamicFeeHook(address(t));
 
         // プールキーの作成（Dynamic Fee有効）
@@ -100,7 +100,7 @@ contract ForkTest is Test {
         // Setup
         MockPoolManager mockManager = new MockPoolManager();
         poolManager = IPoolManager(address(mockManager));
-        TestHook t = new TestHook(poolManager);
+        TestHook t = new TestHook(poolManager, address(this));
         hook = VolatilityDynamicFeeHook(address(t));
 
         PoolKey memory key = PoolKey({
@@ -154,7 +154,7 @@ contract ForkTest is Test {
     function test_priceChangeLimitProtection() public {
         MockPoolManager mockManager = new MockPoolManager();
         poolManager = IPoolManager(address(mockManager));
-        TestHook t = new TestHook(poolManager);
+        TestHook t = new TestHook(poolManager, address(this));
         hook = VolatilityDynamicFeeHook(address(t));
 
         PoolKey memory key = PoolKey({
@@ -201,7 +201,7 @@ contract ForkTest is Test {
     function test_gasUsage() public {
         MockPoolManager mockManager = new MockPoolManager();
         poolManager = IPoolManager(address(mockManager));
-        TestHook t = new TestHook(poolManager);
+        TestHook t = new TestHook(poolManager, address(this));
         hook = VolatilityDynamicFeeHook(address(t));
 
         PoolKey memory key = PoolKey({

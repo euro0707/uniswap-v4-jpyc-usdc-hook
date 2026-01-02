@@ -13,11 +13,13 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {ObservationLibrary} from "./libraries/ObservationLibrary.sol";
 import {BollingerBands} from "./libraries/BollingerBands.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @title VolatilityDynamicFeeHook
 /// @notice ボラティリティに基づいて動的に手数料を調整するUniswap v4 Hook
 /// @dev 過去のスワップ価格変動を記録し、ボラティリティを計算して手数料を決定
-contract VolatilityDynamicFeeHook is BaseHook {
+contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     using PoolIdLibrary for PoolKey;
     using LPFeeLibrary for uint24;
     using StateLibrary for IPoolManager;
@@ -96,7 +98,7 @@ contract VolatilityDynamicFeeHook is BaseHook {
         PoolId indexed poolId
     );
 
-    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
+    constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) Ownable(_owner) {}
 
     /// @notice Hookの権限設定
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
@@ -158,7 +160,7 @@ contract VolatilityDynamicFeeHook is BaseHook {
         PoolKey calldata key,
         SwapParams calldata,
         bytes calldata
-    ) internal override view returns (bytes4, BeforeSwapDelta, uint24) {
+    ) internal override whenNotPaused returns (bytes4, BeforeSwapDelta, uint24) {
         PoolId poolId = key.toId();
 
         // サーキットブレーカーチェック
@@ -482,11 +484,8 @@ contract VolatilityDynamicFeeHook is BaseHook {
     }
 
     /// @notice Reset circuit breaker (owner only)
-    /// @dev This is a simplified version without access control
-    /// @dev In Phase 2.5.3, we will add Ownable for proper access control
     /// @param poolId プールID
-    function resetCircuitBreaker(PoolId poolId) external {
-        // TODO: Phase 2.5.3でOwnable追加後、onlyOwner修飾子を追加
+    function resetCircuitBreaker(PoolId poolId) external onlyOwner {
         circuitBreakerTriggered[poolId] = false;
         emit CircuitBreakerReset(poolId);
     }
@@ -496,5 +495,16 @@ contract VolatilityDynamicFeeHook is BaseHook {
     /// @return isTriggered サーキットブレーカーが発動している場合true
     function isCircuitBreakerTriggered(PoolId poolId) external view returns (bool) {
         return circuitBreakerTriggered[poolId];
+    }
+
+    /// @notice Pause all swap operations (owner only)
+    /// @dev Emergency stop mechanism
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause all swap operations (owner only)
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }

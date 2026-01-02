@@ -16,17 +16,19 @@ contract DeployHook is Script {
     
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        
+        address deployer = vm.addr(deployerPrivateKey);
+
         vm.startBroadcast(deployerPrivateKey);
-        
+
         console.log("=== Deploying VolatilityDynamicFeeHook on Polygon Mainnet ===\n");
-        console.log("Deployer:", vm.addr(deployerPrivateKey));
+        console.log("Deployer:", deployer);
         console.log("PoolManager:", POOL_MANAGER);
         console.log("");
-        
-        // Deploy Hook
+
+        // Deploy Hook (deployer will be the owner)
         VolatilityDynamicFeeHook hook = new VolatilityDynamicFeeHook(
-            IPoolManager(POOL_MANAGER)
+            IPoolManager(POOL_MANAGER),
+            deployer
         );
         
         console.log("Hook deployed at:", address(hook));
