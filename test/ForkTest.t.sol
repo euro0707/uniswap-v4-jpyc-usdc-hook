@@ -169,24 +169,28 @@ contract ForkTest is Test {
         vm.prank(address(poolManager));
         hook.afterInitialize(address(this), key, basePrice, int24(0));
 
-        // 正常な価格変動（40%）は許可される
-        // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
-        uint160 normalPrice = basePrice + uint160((basePrice * 40) / 100);
-        mockManager.setSlot0(normalPrice, int24(0), uint24(0), uint24(3000));
-
         SwapParams memory params = SwapParams({zeroForOne: true, amountSpecified: 1000, sqrtPriceLimitX96: 0});
-        vm.prank(address(poolManager));
-        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
 
-        console.log("40% price change: ALLOWED");
+        // Build up observations with progressing block numbers
+        for (uint256 i = 1; i <= 10; i++) {
+            skip(1 hours);
+            vm.roll(i + 1);
+            uint160 price = basePrice + uint160((basePrice * i * 2) / 100);
+            mockManager.setSlot0(price, int24(0), uint24(0), uint24(3000));
+            vm.prank(address(poolManager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        console.log("Normal price changes (0-20%): ALLOWED");
 
         // 異常な価格変動（60%）は拒否される
         skip(1 hours);
-        uint160 excessivePrice = normalPrice + uint160((normalPrice * 60) / 100);
+        vm.roll(12);
+        uint160 currentPrice = basePrice + uint160((basePrice * 20) / 100);
+        uint160 excessivePrice = currentPrice + uint160((currentPrice * 60) / 100);
         mockManager.setSlot0(excessivePrice, int24(0), uint24(0), uint24(3000));
 
-        vm.expectRevert(VolatilityDynamicFeeHook.PriceChangeExceedsLimit.selector);
+        vm.expectRevert(VolatilityDynamicFeeHook.PriceManipulationDetected.selector);
         vm.prank(address(poolManager));
         hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
 

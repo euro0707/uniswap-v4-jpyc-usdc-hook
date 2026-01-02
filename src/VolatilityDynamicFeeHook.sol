@@ -24,15 +24,16 @@ contract VolatilityDynamicFeeHook is BaseHook {
 
     // エラー定義
     error MustUseDynamicFee();
-    error PriceChangeExceedsLimit();
     error InsufficientObservations();
     error InsufficientBlockSpan();
     error PriceManipulationDetected();
+    error CircuitBreakerTriggered();
 
     // プールごとの状態管理
     mapping(PoolId => ObservationLibrary.RingBuffer) public observations;
     mapping(PoolId => BollingerBands.Config) public bbConfig;
     mapping(PoolId => uint256) public lastRebalanceTime;
+    mapping(PoolId => bool) public circuitBreakerTriggered;
 
     // 設定パラメータ（USDC/JPYC = USD/JPY為替ペア向け最適化）
     // USDC/JPYCは実質的にドル円レートを反映するため、通常の為替ボラティリティ（0.5-1.5%/日）を想定
@@ -47,6 +48,7 @@ contract VolatilityDynamicFeeHook is BaseHook {
     // セキュリティパラメータ
     uint256 public constant MIN_BLOCK_SPAN = 3;     // 最小ブロック数（フラッシュローン攻撃防止）
     uint256 public constant PRICE_CHANGE_LOOKBACK = 10; // 価格変動チェックの観測数
+    uint256 public constant CIRCUIT_BREAKER_THRESHOLD = 1000; // サーキットブレーカー閾値 10% (1000 = 10%)
 
     // イベント定義
     event RebalanceTriggered(
@@ -82,6 +84,16 @@ contract VolatilityDynamicFeeHook is BaseHook {
         PoolId indexed poolId,
         uint256 priceChange,
         uint256 blockSpan
+    );
+
+    event CircuitBreakerActivated(
+        PoolId indexed poolId,
+        uint256 priceChange,
+        uint160 currentPrice
+    );
+
+    event CircuitBreakerReset(
+        PoolId indexed poolId
     );
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
@@ -147,8 +159,15 @@ contract VolatilityDynamicFeeHook is BaseHook {
         SwapParams calldata,
         bytes calldata
     ) internal override view returns (bytes4, BeforeSwapDelta, uint24) {
+        PoolId poolId = key.toId();
+
+        // サーキットブレーカーチェック
+        if (circuitBreakerTriggered[poolId]) {
+            revert CircuitBreakerTriggered();
+        }
+
         // ボラティリティを計算
-        uint256 volatility = _calculateVolatility(key.toId());
+        uint256 volatility = _calculateVolatility(poolId);
 
         // ボラティリティに基づいて手数料を決定
         uint24 fee = _getFeeBasedOnVolatility(volatility);
@@ -200,6 +219,15 @@ contract VolatilityDynamicFeeHook is BaseHook {
         // セキュリティチェック: 最大価格変動
         if (obs.count >= PRICE_CHANGE_LOOKBACK) {
             uint256 maxChange = ObservationLibrary.getMaxPriceChange(obs, PRICE_CHANGE_LOOKBACK);
+
+            // サーキットブレーカーチェック（10%以上の変動）
+            if (maxChange > CIRCUIT_BREAKER_THRESHOLD && !circuitBreakerTriggered[poolId]) {
+                circuitBreakerTriggered[poolId] = true;
+                emit CircuitBreakerActivated(poolId, maxChange, sqrtPriceX96);
+                // サーキットブレーカー発動後も処理を継続（次回のスワップから停止）
+            }
+
+            // 価格操作検出（50%以上の変動）
             if (maxChange > MAX_PRICE_CHANGE_BPS) {
                 emit PriceManipulationAttempt(poolId, maxChange, obs.count);
                 // 異常な価格変動を検出
@@ -451,5 +479,22 @@ contract VolatilityDynamicFeeHook is BaseHook {
         (isOutOfBands,) = BollingerBands.isOutOfBands(currentTick, bands);
         isInSoftZone = BollingerBands.isInSoftZone(currentTick, bands);
         bandWidth = bands.width;
+    }
+
+    /// @notice Reset circuit breaker (owner only)
+    /// @dev This is a simplified version without access control
+    /// @dev In Phase 2.5.3, we will add Ownable for proper access control
+    /// @param poolId プールID
+    function resetCircuitBreaker(PoolId poolId) external {
+        // TODO: Phase 2.5.3でOwnable追加後、onlyOwner修飾子を追加
+        circuitBreakerTriggered[poolId] = false;
+        emit CircuitBreakerReset(poolId);
+    }
+
+    /// @notice Check if circuit breaker is triggered
+    /// @param poolId プールID
+    /// @return isTriggered サーキットブレーカーが発動している場合true
+    function isCircuitBreakerTriggered(PoolId poolId) external view returns (bool) {
+        return circuitBreakerTriggered[poolId];
     }
 }
