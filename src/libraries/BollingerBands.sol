@@ -36,45 +36,51 @@ library BollingerBands {
         // Get recent observations within timeframe
         (ObservationLibrary.Observation[] memory recent, uint256 count) =
             ObservationLibrary.getRecent(observations, config.timeframe);
-        
+
         require(count >= config.period, "Insufficient observations");
-        
-        // 1. Calculate moving average (MA)
-        uint256 sum = 0;
+
+        // 1. Calculate moving average (MA) using ticks
+        int256 sumTick = 0;
         for (uint256 i = 0; i < count; i++) {
-            sum += recent[i].price;
+            sumTick += int256(recent[i].tick);
         }
-        uint256 ma = sum / count;
-        
-        // 2. Calculate standard deviation (σ)
+        int256 maTick = sumTick / int256(count);
+
+        // 2. Calculate standard deviation (σ) in tick space
         uint256 varianceSum = 0;
         for (uint256 i = 0; i < count; i++) {
-            uint256 price = recent[i].price;
-            uint256 diff = price > ma ? price - ma : ma - price;
-            varianceSum += (diff * diff);
+            int256 tick = int256(recent[i].tick);
+            int256 diff = tick > maTick ? tick - maTick : maTick - tick;
+            varianceSum += uint256(diff * diff);
         }
-        
+
         uint256 variance = varianceSum / count;
         uint256 stdDev = sqrt(variance);
-        
-        // 3. Calculate bands (MA ± 2σ)
-        uint256 upperPrice = ma + ((stdDev * config.standardDeviation) / 100);
-        uint256 lowerPrice = ma - ((stdDev * config.standardDeviation) / 100);
-        
-        // 4. Calculate soft boundaries (MA ± 1.8σ)
-        uint256 softUpperPrice = ma + ((stdDev * config.softBandBps) / 100);
-        uint256 softLowerPrice = ma - ((stdDev * config.softBandBps) / 100);
-        
-        // Convert to ticks
-        bands.middle = priceToTick(ma);
-        bands.upper = priceToTick(upperPrice);
-        bands.lower = priceToTick(lowerPrice);
-        bands.softUpper = priceToTick(softUpperPrice);
-        bands.softLower = priceToTick(softLowerPrice);
-        
-        // Calculate band width in basis points
-        bands.width = ((upperPrice - lowerPrice) * 10000) / ma;
-        
+
+        // 3. Calculate bands (MA ± 2σ) in tick space
+        int256 deviation = int256((stdDev * config.standardDeviation) / 100);
+        int256 upperTick = maTick + deviation;
+        int256 lowerTick = maTick - deviation;
+
+        // 4. Calculate soft boundaries (MA ± 1.8σ) in tick space
+        int256 softDeviation = int256((stdDev * config.softBandBps) / 100);
+        int256 softUpperTick = maTick + softDeviation;
+        int256 softLowerTick = maTick - softDeviation;
+
+        // Assign ticks (with range checks)
+        bands.middle = _toInt24(maTick);
+        bands.upper = _toInt24(upperTick);
+        bands.lower = _toInt24(lowerTick);
+        bands.softUpper = _toInt24(softUpperTick);
+        bands.softLower = _toInt24(softLowerTick);
+
+        // Calculate band width in basis points (using tick range)
+        int256 tickDiff = upperTick - lowerTick;
+        uint256 tickRange = tickDiff >= 0 ? uint256(tickDiff) : uint256(-tickDiff);
+        // Use tick range directly as width (represents volatility in tick space)
+        // For JPYC/USDC, typical tick spacing is small, so raw range is meaningful
+        bands.width = tickRange;
+
         return bands;
     }
     
@@ -95,20 +101,20 @@ library BollingerBands {
     /// @notice Check if price is in soft boundary zone
     /// @param currentTick Current price tick
     /// @param bands Calculated bands
-    /// @return isInSoftZone True if between 1.8σ and 2.0σ
+    /// @return inSoftZone True if between 1.8σ and 2.0σ
     function isInSoftZone(
         int24 currentTick,
         Bands memory bands
-    ) internal pure returns (bool isInSoftZone) {
+    ) internal pure returns (bool inSoftZone) {
         bool aboveSoftUpper = currentTick > bands.softUpper && currentTick <= bands.upper;
         bool belowSoftLower = currentTick < bands.softLower && currentTick >= bands.lower;
-        isInSoftZone = aboveSoftUpper || belowSoftLower;
+        inSoftZone = aboveSoftUpper || belowSoftLower;
     }
     
     /// @notice Square root using Babylonian method
     function sqrt(uint256 x) internal pure returns (uint256 y) {
         if (x == 0) return 0;
-        
+
         uint256 z = (x + 1) / 2;
         y = x;
         while (z < y) {
@@ -116,11 +122,12 @@ library BollingerBands {
             z = (x / z + z) / 2;
         }
     }
-    
-    /// @notice Convert price to tick (simplified)
-    function priceToTick(uint256 price) internal pure returns (int24) {
-        // Simplified conversion for JPYC/USDC range
-        // Actual implementation should use TickMath library
-        return int24(int256(price >> 16));
+
+    /// @notice Safely convert int256 to int24 with bounds checking
+    function _toInt24(int256 value) private pure returns (int24) {
+        // int24 range: -8388608 to 8388607
+        if (value > 8388607) return 8388607;
+        if (value < -8388608) return -8388608;
+        return int24(value);
     }
 }

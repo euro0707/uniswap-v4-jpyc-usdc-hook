@@ -46,10 +46,11 @@ library ObservationLibrary {
         RingBuffer storage self,
         uint256 timeframe
     ) internal view returns (Observation[] memory observations, uint256 count) {
-        uint256 oldestTimestamp = block.timestamp - timeframe;
+        // Handle underflow: if block.timestamp < timeframe, use all observations
+        uint256 oldestTimestamp = block.timestamp > timeframe ? block.timestamp - timeframe : 0;
         observations = new Observation[](self.count);
         count = 0;
-        
+
         for (uint256 i = 0; i < self.count; i++) {
             Observation storage obs = self.data[i];
             if (obs.timestamp >= oldestTimestamp) {
