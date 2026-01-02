@@ -26,6 +26,8 @@ contract VolatilityDynamicFeeHook is BaseHook {
     error MustUseDynamicFee();
     error PriceChangeExceedsLimit();
     error InsufficientObservations();
+    error InsufficientBlockSpan();
+    error PriceManipulationDetected();
 
     // プールごとの状態管理
     mapping(PoolId => ObservationLibrary.RingBuffer) public observations;
@@ -41,6 +43,10 @@ contract VolatilityDynamicFeeHook is BaseHook {
     uint256 public constant MIN_UPDATE_INTERVAL = 1 hours; // Codex版: 1時間間隔で観測を記録
     uint256 public constant MAX_PRICE_CHANGE_BPS = 5000; // 最大価格変動 50% (5000 = 50%)
     uint256 public constant REBALANCE_COOLDOWN = 2 hours; // リバランスのクールダウン期間
+
+    // セキュリティパラメータ
+    uint256 public constant MIN_BLOCK_SPAN = 3;     // 最小ブロック数（フラッシュローン攻撃防止）
+    uint256 public constant PRICE_CHANGE_LOOKBACK = 10; // 価格変動チェックの観測数
 
     // イベント定義
     event RebalanceTriggered(
@@ -70,6 +76,12 @@ contract VolatilityDynamicFeeHook is BaseHook {
         uint256 bandWidth,
         int24 upperBand,
         int24 lowerBand
+    );
+
+    event PriceManipulationAttempt(
+        PoolId indexed poolId,
+        uint256 priceChange,
+        uint256 blockSpan
     );
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
@@ -174,6 +186,26 @@ contract VolatilityDynamicFeeHook is BaseHook {
         ObservationLibrary.push(obs, block.timestamp, sqrtPriceX96);
 
         emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
+
+        // セキュリティチェック: 複数ブロック検証
+        if (obs.count >= MIN_BLOCK_SPAN) {
+            bool isMultiBlock = ObservationLibrary.validateMultiBlock(obs, MIN_BLOCK_SPAN);
+            if (!isMultiBlock) {
+                emit PriceManipulationAttempt(poolId, 0, 0);
+                // フラッシュローン攻撃の可能性があるため、BBのさらなる処理をスキップ
+                return (BaseHook.afterSwap.selector, 0);
+            }
+        }
+
+        // セキュリティチェック: 最大価格変動
+        if (obs.count >= PRICE_CHANGE_LOOKBACK) {
+            uint256 maxChange = ObservationLibrary.getMaxPriceChange(obs, PRICE_CHANGE_LOOKBACK);
+            if (maxChange > MAX_PRICE_CHANGE_BPS) {
+                emit PriceManipulationAttempt(poolId, maxChange, obs.count);
+                // 異常な価格変動を検出
+                revert PriceManipulationDetected();
+            }
+        }
 
         // BB計算が可能か確認（24個以上の観測が必要）
         if (obs.count >= bbConfig[poolId].period) {

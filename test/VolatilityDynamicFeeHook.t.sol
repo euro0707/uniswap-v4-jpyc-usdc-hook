@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
+import "forge-std/Vm.sol";
 import "../src/VolatilityDynamicFeeHook.sol";
 import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -438,6 +439,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // Add exactly 24 observations (minimum for BB calculation)
         for (uint256 i = 1; i <= 23; i++) {
             skip(1 hours);
+            vm.roll(i + 1); // Advance block number
             uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
             bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
             manager.setDefaultSlotData(newSlot);
@@ -447,16 +449,27 @@ contract VolatilityDynamicFeeHookTest is Test {
 
         // 24th observation should trigger BB calculation and BandWidthUpdated event
         skip(1 hours);
+        vm.roll(25); // Advance block number
         uint160 finalPrice = basePrice + uint160((basePrice * 24) / 100);
         bytes32 finalSlot = encodeSlot0(finalPrice, int24(120), uint24(0), uint24(3000));
         manager.setDefaultSlotData(finalSlot);
 
-        // Expect BandWidthUpdated event
-        vm.expectEmit(true, false, false, false);
-        emit VolatilityDynamicFeeHook.BandWidthUpdated(key.toId(), 0, 0, 0); // We only check poolId
+        // Record events (note: security checks may emit additional events)
+        vm.recordLogs();
 
         vm.prank(address(manager));
         hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Verify BandWidthUpdated event was emitted (among potentially other events)
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool foundBandWidthEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == keccak256("BandWidthUpdated(bytes32,uint256,int24,int24)")) {
+                foundBandWidthEvent = true;
+                break;
+            }
+        }
+        assertTrue(foundBandWidthEvent, "BandWidthUpdated event should be emitted");
 
         // Verify band width can be retrieved via getRangeStatus
         (,, uint256 bandWidth) = hook.getRangeStatus(key.toId());
