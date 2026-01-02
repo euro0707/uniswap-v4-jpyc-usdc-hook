@@ -58,6 +58,20 @@ contract VolatilityDynamicFeeHook is BaseHook {
         uint256 observationCount
     );
 
+    event SoftZoneEntered(
+        PoolId indexed poolId,
+        int24 currentTick,
+        int24 softBand,
+        bool isAbove
+    );
+
+    event BandWidthUpdated(
+        PoolId indexed poolId,
+        uint256 bandWidth,
+        int24 upperBand,
+        int24 lowerBand
+    );
+
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
 
     /// @notice Hookの権限設定
@@ -169,6 +183,9 @@ contract VolatilityDynamicFeeHook is BaseHook {
                 bbConfig[poolId]
             );
 
+            // バンド幅を記録
+            emit BandWidthUpdated(poolId, bands.width, bands.upper, bands.lower);
+
             // 現在価格がバンド外かチェック
             int24 currentTick = _getCurrentTick(poolId);
             (bool isOutside, bool isAbove) = BollingerBands.isOutOfBands(
@@ -179,6 +196,15 @@ contract VolatilityDynamicFeeHook is BaseHook {
             // バンド外の場合、リバランスをトリガー
             if (isOutside) {
                 _triggerRebalance(poolId, bands, isAbove);
+            } else {
+                // ソフトゾーン（1.8σ〜2σ）をチェック
+                bool isInSoftZone = BollingerBands.isInSoftZone(currentTick, bands);
+                if (isInSoftZone) {
+                    // 上側か下側かを判定
+                    bool isSoftAbove = currentTick > bands.middle;
+                    int24 relevantBand = isSoftAbove ? bands.softUpper : bands.softLower;
+                    emit SoftZoneEntered(poolId, currentTick, relevantBand, isSoftAbove);
+                }
             }
         }
 
@@ -345,5 +371,53 @@ contract VolatilityDynamicFeeHook is BaseHook {
             revert InsufficientObservations();
         }
         return BollingerBands.calculate(observations[poolId], bbConfig[poolId]);
+    }
+
+    /// @notice Check if current price is in soft zone (1.8σ ~ 2σ)
+    /// @param poolId プールID
+    /// @return isInSoftZone ソフトゾーンにいる場合true
+    /// @return isAbove 上側ソフトゾーンの場合true、下側の場合false
+    function checkSoftZone(PoolId poolId)
+        external
+        view
+        returns (bool isInSoftZone, bool isAbove)
+    {
+        if (observations[poolId].count < bbConfig[poolId].period) {
+            return (false, false);
+        }
+
+        BollingerBands.Bands memory bands = BollingerBands.calculate(
+            observations[poolId],
+            bbConfig[poolId]
+        );
+
+        int24 currentTick = _getCurrentTick(poolId);
+        isInSoftZone = BollingerBands.isInSoftZone(currentTick, bands);
+        isAbove = currentTick > bands.middle;
+    }
+
+    /// @notice Get dynamic range status
+    /// @param poolId プールID
+    /// @return isOutOfBands バンド外の場合true
+    /// @return isInSoftZone ソフトゾーンの場合true
+    /// @return bandWidth バンド幅（bps）
+    function getRangeStatus(PoolId poolId)
+        external
+        view
+        returns (bool isOutOfBands, bool isInSoftZone, uint256 bandWidth)
+    {
+        if (observations[poolId].count < bbConfig[poolId].period) {
+            return (false, false, 0);
+        }
+
+        BollingerBands.Bands memory bands = BollingerBands.calculate(
+            observations[poolId],
+            bbConfig[poolId]
+        );
+
+        int24 currentTick = _getCurrentTick(poolId);
+        (isOutOfBands,) = BollingerBands.isOutOfBands(currentTick, bands);
+        isInSoftZone = BollingerBands.isInSoftZone(currentTick, bands);
+        bandWidth = bands.width;
     }
 }
