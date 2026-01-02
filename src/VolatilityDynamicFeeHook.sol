@@ -12,7 +12,6 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {ObservationLibrary} from "./libraries/ObservationLibrary.sol";
-import {BollingerBands} from "./libraries/BollingerBands.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
@@ -33,8 +32,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
     // プールごとの状態管理
     mapping(PoolId => ObservationLibrary.RingBuffer) public observations;
-    mapping(PoolId => BollingerBands.Config) public bbConfig;
-    mapping(PoolId => uint256) public lastRebalanceTime;
     mapping(PoolId => bool) public circuitBreakerTriggered;
 
     // 設定パラメータ（USDC/JPYC = USD/JPY為替ペア向け最適化）
@@ -45,7 +42,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     uint256 public constant VOLATILITY_THRESHOLD = 500; // ボラティリティの閾値
     uint256 public constant MIN_UPDATE_INTERVAL = 1 hours; // Codex版: 1時間間隔で観測を記録
     uint256 public constant MAX_PRICE_CHANGE_BPS = 5000; // 最大価格変動 50% (5000 = 50%)
-    uint256 public constant REBALANCE_COOLDOWN = 2 hours; // リバランスのクールダウン期間
 
     // セキュリティパラメータ
     uint256 public constant MIN_BLOCK_SPAN = 3;     // 最小ブロック数（フラッシュローン攻撃防止）
@@ -53,33 +49,11 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     uint256 public constant CIRCUIT_BREAKER_THRESHOLD = 1000; // サーキットブレーカー閾値 10% (1000 = 10%)
 
     // イベント定義
-    event RebalanceTriggered(
-        PoolId indexed poolId,
-        int24 upperBand,
-        int24 middleBand,
-        int24 lowerBand,
-        bool isAbove
-    );
-
     event ObservationRecorded(
         PoolId indexed poolId,
         uint256 timestamp,
         uint160 sqrtPriceX96,
         uint256 observationCount
-    );
-
-    event SoftZoneEntered(
-        PoolId indexed poolId,
-        int24 currentTick,
-        int24 softBand,
-        bool isAbove
-    );
-
-    event BandWidthUpdated(
-        PoolId indexed poolId,
-        uint256 bandWidth,
-        int24 upperBand,
-        int24 lowerBand
     );
 
     event PriceManipulationAttempt(
@@ -132,22 +106,12 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         PoolId poolId = key.toId();
 
-        // Bollinger Bands設定を初期化
-        bbConfig[poolId] = BollingerBands.Config({
-            period: 24,              // 24時間（24個の観測）
-            standardDeviation: 200,  // 2.0σ
-            timeframe: 86400,        // 24時間（秒）
-            softBandBps: 180         // 1.8σ
-        });
-
         // 初期観測を追加
         ObservationLibrary.push(
             observations[poolId],
             block.timestamp,
             sqrtPriceX96
         );
-
-        lastRebalanceTime[poolId] = block.timestamp;
 
         emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, 1);
 
@@ -203,72 +167,54 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         // 現在価格を取得
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
 
-        // 観測を追加
-        ObservationLibrary.push(obs, block.timestamp, sqrtPriceX96);
-
-        emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
-
-        // セキュリティチェック: 複数ブロック検証
+        // セキュリティチェック1: 複数ブロック検証
         if (obs.count >= MIN_BLOCK_SPAN) {
             bool isMultiBlock = ObservationLibrary.validateMultiBlock(obs, MIN_BLOCK_SPAN);
             if (!isMultiBlock) {
                 emit PriceManipulationAttempt(poolId, 0, 0);
-                // フラッシュローン攻撃の可能性があるため、BBのさらなる処理をスキップ
+                // フラッシュローン攻撃の可能性、観測をスキップ
                 return (BaseHook.afterSwap.selector, 0);
             }
         }
 
-        // セキュリティチェック: 最大価格変動
-        if (obs.count >= PRICE_CHANGE_LOOKBACK) {
-            uint256 maxChange = ObservationLibrary.getMaxPriceChange(obs, PRICE_CHANGE_LOOKBACK);
+        // セキュリティチェック2: 新しい価格の変動をチェック（観測追加前）
+        if (obs.count > 0) {
+            uint256 lastIdx = obs.index == 0 ? 99 : obs.index - 1;
+            uint160 lastPrice = obs.data[lastIdx].sqrtPriceX96;
 
-            // サーキットブレーカーチェック（10%以上の変動）
-            if (maxChange > CIRCUIT_BREAKER_THRESHOLD && !circuitBreakerTriggered[poolId]) {
-                circuitBreakerTriggered[poolId] = true;
-                emit CircuitBreakerActivated(poolId, maxChange, sqrtPriceX96);
-                // サーキットブレーカー発動後も処理を継続（次回のスワップから停止）
-            }
+            if (lastPrice > 0) {
+                // 新しい価格と最後の価格の変動率を計算
+                uint256 currSqrt = uint256(sqrtPriceX96);
+                uint256 prevSqrt = uint256(lastPrice);
 
-            // 価格操作検出（50%以上の変動）
-            if (maxChange > MAX_PRICE_CHANGE_BPS) {
-                emit PriceManipulationAttempt(poolId, maxChange, obs.count);
-                // 異常な価格変動を検出
-                revert PriceManipulationDetected();
-            }
-        }
+                uint256 priceChange;
+                if (currSqrt > prevSqrt) {
+                    uint256 numerator = (currSqrt + prevSqrt) * (currSqrt - prevSqrt);
+                    uint256 denominator = prevSqrt * prevSqrt;
+                    priceChange = (numerator * 10000) / denominator;
+                } else {
+                    uint256 numerator = (currSqrt + prevSqrt) * (prevSqrt - currSqrt);
+                    uint256 denominator = prevSqrt * prevSqrt;
+                    priceChange = (numerator * 10000) / denominator;
+                }
 
-        // BB計算が可能か確認（24個以上の観測が必要）
-        if (obs.count >= bbConfig[poolId].period) {
-            // Bollinger Bandsを計算
-            BollingerBands.Bands memory bands = BollingerBands.calculate(
-                obs,
-                bbConfig[poolId]
-            );
+                // 50%以上の変動を拒否
+                if (priceChange > MAX_PRICE_CHANGE_BPS) {
+                    emit PriceManipulationAttempt(poolId, priceChange, obs.count);
+                    revert PriceManipulationDetected();
+                }
 
-            // バンド幅を記録
-            emit BandWidthUpdated(poolId, bands.width, bands.upper, bands.lower);
-
-            // 現在価格がバンド外かチェック
-            int24 currentTick = _getCurrentTick(poolId);
-            (bool isOutside, bool isAbove) = BollingerBands.isOutOfBands(
-                currentTick,
-                bands
-            );
-
-            // バンド外の場合、リバランスをトリガー
-            if (isOutside) {
-                _triggerRebalance(poolId, bands, isAbove);
-            } else {
-                // ソフトゾーン（1.8σ〜2σ）をチェック
-                bool isInSoftZone = BollingerBands.isInSoftZone(currentTick, bands);
-                if (isInSoftZone) {
-                    // 上側か下側かを判定
-                    bool isSoftAbove = currentTick > bands.middle;
-                    int24 relevantBand = isSoftAbove ? bands.softUpper : bands.softLower;
-                    emit SoftZoneEntered(poolId, currentTick, relevantBand, isSoftAbove);
+                // 10%以上の変動でサーキットブレーカー
+                if (priceChange > CIRCUIT_BREAKER_THRESHOLD && !circuitBreakerTriggered[poolId]) {
+                    circuitBreakerTriggered[poolId] = true;
+                    emit CircuitBreakerActivated(poolId, priceChange, sqrtPriceX96);
                 }
             }
         }
+
+        // セキュリティチェックに合格したら観測を追加
+        ObservationLibrary.push(obs, block.timestamp, sqrtPriceX96);
+        emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
 
         return (BaseHook.afterSwap.selector, 0);
     }
@@ -398,89 +344,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     function _getCurrentTick(PoolId poolId) internal view returns (int24) {
         (, int24 tick,,) = poolManager.getSlot0(poolId);
         return tick;
-    }
-
-    /// @notice Trigger rebalance when price is out of bands
-    /// @dev Emits event for off-chain keeper to execute rebalance
-    /// @param poolId プールID
-    /// @param bands Bollinger Bandsの計算結果
-    /// @param isAbove 価格が上限を超えている場合true
-    function _triggerRebalance(
-        PoolId poolId,
-        BollingerBands.Bands memory bands,
-        bool isAbove
-    ) internal {
-        // Check cooldown period (2 hours)
-        if (block.timestamp < lastRebalanceTime[poolId] + REBALANCE_COOLDOWN) {
-            return;
-        }
-
-        lastRebalanceTime[poolId] = block.timestamp;
-
-        // Emit event for keeper
-        emit RebalanceTriggered(poolId, bands.upper, bands.middle, bands.lower, isAbove);
-    }
-
-    /// @notice Get Bollinger Bands for pool
-    /// @param poolId プールID
-    /// @return bands Bollinger Bandsの計算結果
-    function getBollingerBands(PoolId poolId)
-        external
-        view
-        returns (BollingerBands.Bands memory)
-    {
-        if (observations[poolId].count < bbConfig[poolId].period) {
-            revert InsufficientObservations();
-        }
-        return BollingerBands.calculate(observations[poolId], bbConfig[poolId]);
-    }
-
-    /// @notice Check if current price is in soft zone (1.8σ ~ 2σ)
-    /// @param poolId プールID
-    /// @return isInSoftZone ソフトゾーンにいる場合true
-    /// @return isAbove 上側ソフトゾーンの場合true、下側の場合false
-    function checkSoftZone(PoolId poolId)
-        external
-        view
-        returns (bool isInSoftZone, bool isAbove)
-    {
-        if (observations[poolId].count < bbConfig[poolId].period) {
-            return (false, false);
-        }
-
-        BollingerBands.Bands memory bands = BollingerBands.calculate(
-            observations[poolId],
-            bbConfig[poolId]
-        );
-
-        int24 currentTick = _getCurrentTick(poolId);
-        isInSoftZone = BollingerBands.isInSoftZone(currentTick, bands);
-        isAbove = currentTick > bands.middle;
-    }
-
-    /// @notice Get dynamic range status
-    /// @param poolId プールID
-    /// @return isOutOfBands バンド外の場合true
-    /// @return isInSoftZone ソフトゾーンの場合true
-    /// @return bandWidth バンド幅（bps）
-    function getRangeStatus(PoolId poolId)
-        external
-        view
-        returns (bool isOutOfBands, bool isInSoftZone, uint256 bandWidth)
-    {
-        if (observations[poolId].count < bbConfig[poolId].period) {
-            return (false, false, 0);
-        }
-
-        BollingerBands.Bands memory bands = BollingerBands.calculate(
-            observations[poolId],
-            bbConfig[poolId]
-        );
-
-        int24 currentTick = _getCurrentTick(poolId);
-        (isOutOfBands,) = BollingerBands.isOutOfBands(currentTick, bands);
-        isInSoftZone = BollingerBands.isInSoftZone(currentTick, bands);
-        bandWidth = bands.width;
     }
 
     /// @notice Reset circuit breaker (owner only)

@@ -9,8 +9,6 @@ library ObservationLibrary {
         uint256 timestamp;
         uint256 blockNumber;
         uint160 sqrtPriceX96;
-        uint256 price;
-        int24 tick;
     }
     
     /// @notice Ring buffer for observations
@@ -26,15 +24,10 @@ library ObservationLibrary {
         uint256 timestamp,
         uint160 sqrtPriceX96
     ) internal {
-        uint256 price = _sqrtPriceX96ToPrice(sqrtPriceX96);
-        int24 tick = _sqrtPriceX96ToTick(sqrtPriceX96);
-
         self.data[self.index] = Observation({
             timestamp: timestamp,
             blockNumber: block.number,
-            sqrtPriceX96: sqrtPriceX96,
-            price: price,
-            tick: tick
+            sqrtPriceX96: sqrtPriceX96
         });
 
         self.index = (self.index + 1) % 100;
@@ -126,11 +119,19 @@ library ObservationLibrary {
                 continue;
             }
 
+            // 実際の価格変動率を計算: price = sqrtPrice^2
+            // 変動率 = |currPrice - prevPrice| / prevPrice
+            //       = |currSqrt^2 - prevSqrt^2| / prevSqrt^2
+            //       = |(currSqrt + prevSqrt)(currSqrt - prevSqrt)| / prevSqrt^2
             uint256 change;
             if (currSqrt > prevSqrt) {
-                change = ((currSqrt - prevSqrt) * 10000) / prevSqrt;
+                uint256 numerator = (currSqrt + prevSqrt) * (currSqrt - prevSqrt);
+                uint256 denominator = prevSqrt * prevSqrt;
+                change = (numerator * 10000) / denominator;
             } else {
-                change = ((prevSqrt - currSqrt) * 10000) / prevSqrt;
+                uint256 numerator = (currSqrt + prevSqrt) * (prevSqrt - currSqrt);
+                uint256 denominator = prevSqrt * prevSqrt;
+                change = (numerator * 10000) / denominator;
             }
 
             if (change > maxChange) {
@@ -141,14 +142,5 @@ library ObservationLibrary {
         }
 
         return maxChange;
-    }
-
-    function _sqrtPriceX96ToPrice(uint160 sqrtPriceX96) private pure returns (uint256) {
-        uint256 price = uint256(sqrtPriceX96) * uint256(sqrtPriceX96);
-        return price >> 192;
-    }
-
-    function _sqrtPriceX96ToTick(uint160 sqrtPriceX96) private pure returns (int24) {
-        return int24(int256((uint256(sqrtPriceX96) >> 32)));
     }
 }

@@ -204,6 +204,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(slot);
 
+        vm.roll(1); // Set initial block number before initialization
         vm.prank(address(manager));
         hook.afterInitialize(address(this), key, basePrice, int24(0));
 
@@ -213,6 +214,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 15; i++) {
             skip(1 hours);
+            vm.roll(1 + i); // Advance block number for multi-block validation
 
             uint160 newPrice = basePrice + uint160(i * 1000000);
             bytes32 newSlot = encodeSlot0(newPrice, int24(0), uint24(0), uint24(3000));
@@ -252,15 +254,17 @@ contract VolatilityDynamicFeeHookTest is Test {
         bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(slot);
 
+        vm.roll(1); // Set initial block number before initialization
         vm.prank(address(manager));
         hook.afterInitialize(address(this), key, basePrice, int24(0));
 
         SwapParams memory params = SwapParams(true, 1000, 0);
 
-        // perform 3 consecutive swaps with sufficient time intervals
+        // perform 3 consecutive swaps with sufficient time and block intervals
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 3; i++) {
             skip(1 hours);
+            vm.roll(1 + i); // Advance block number for multi-block validation
 
             uint160 newPrice = basePrice + uint160(i * 500000);
             bytes32 newSlot = encodeSlot0(newPrice, int24(0), uint24(0), uint24(3000));
@@ -320,6 +324,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(slot);
 
+        vm.roll(1); // Set initial block number before initialization
         vm.prank(address(manager));
         hook.afterInitialize(address(this), key, basePrice, int24(0));
 
@@ -329,6 +334,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 3; i++) {
             skip(1 hours);
+            vm.roll(1 + i); // Advance block number for multi-block validation
             uint160 normalPrice = basePrice + uint160((basePrice * i) / 200); // +0.5% each
             bytes32 normalSlot = encodeSlot0(normalPrice, int24(0), uint24(0), uint24(3000));
             manager.setDefaultSlotData(normalSlot);
@@ -339,10 +345,12 @@ contract VolatilityDynamicFeeHookTest is Test {
         uint24 normalFee = hook.getCurrentFee(key);
 
         // Attacker tries to manipulate price with MIN_UPDATE_INTERVAL
-        // Use 40% increase to stay within the MAX_PRICE_CHANGE_BPS limit
+        // Use 14% sqrtPrice increase (≈30% actual price increase) to stay within the MAX_PRICE_CHANGE_BPS (50%) limit
+        // Actual price change = (1.14)^2 - 1 ≈ 0.30 = 30%
         skip(1 hours);
+        vm.roll(5); // Advance block number for multi-block validation
         uint160 lastPrice = basePrice + uint160((basePrice * 3) / 200); // last recorded was +1.5%
-        uint160 manipulatedPrice = lastPrice + uint160((lastPrice * 40) / 100); // 40% increase (within limit)
+        uint160 manipulatedPrice = lastPrice + uint160((lastPrice * 14) / 100); // 14% sqrtPrice increase (≈30% price increase, within limit)
         bytes32 manipSlot = encodeSlot0(manipulatedPrice, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(manipSlot);
         vm.prank(address(manager));
@@ -390,133 +398,6 @@ contract VolatilityDynamicFeeHookTest is Test {
     // Phase 1.5.3: Bollinger Bands Tests
     // ============================================
 
-    function test_softZone_detection() public {
-        // Test soft zone detection (1.8σ ~ 2σ)
-        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
-        uint160 basePrice = uint160(1 << 96);
-
-        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(slot);
-
-        vm.prank(address(manager));
-        hook.afterInitialize(address(this), key, basePrice, int24(0));
-
-        SwapParams memory params = SwapParams(true, 1000, 0);
-
-        // Add 24+ observations to enable BB calculation
-        for (uint256 i = 1; i <= 25; i++) {
-            skip(1 hours);
-            // Create moderate price variation (within 2σ but approach soft zone)
-            uint160 newPrice = basePrice + uint160((basePrice * i) / 50); // +2% each
-            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 10)), uint24(0), uint24(3000));
-            manager.setDefaultSlotData(newSlot);
-            vm.prank(address(manager));
-            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-        }
-
-        // Check soft zone status
-        (bool isInSoftZone, bool isAbove) = hook.checkSoftZone(key.toId());
-
-        // Verify the API works (actual values depend on price distribution)
-        // The function should not revert and return valid boolean values
-        assertTrue(isInSoftZone || !isInSoftZone, "checkSoftZone should return valid boolean");
-        assertTrue(isAbove || !isAbove, "isAbove should return valid boolean");
-    }
-
-    function test_bandWidth_updates() public {
-        // Test BandWidthUpdated event emission
-        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
-        uint160 basePrice = uint160(1 << 96);
-
-        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(slot);
-
-        vm.prank(address(manager));
-        hook.afterInitialize(address(this), key, basePrice, int24(0));
-
-        SwapParams memory params = SwapParams(true, 1000, 0);
-
-        // Add exactly 24 observations (minimum for BB calculation)
-        for (uint256 i = 1; i <= 23; i++) {
-            skip(1 hours);
-            vm.roll(i + 1); // Advance block number
-            uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
-            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
-            manager.setDefaultSlotData(newSlot);
-            vm.prank(address(manager));
-            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-        }
-
-        // 24th observation should trigger BB calculation and BandWidthUpdated event
-        skip(1 hours);
-        vm.roll(25); // Advance block number
-        uint160 finalPrice = basePrice + uint160((basePrice * 24) / 100);
-        bytes32 finalSlot = encodeSlot0(finalPrice, int24(120), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(finalSlot);
-
-        // Record events (note: security checks may emit additional events)
-        vm.recordLogs();
-
-        vm.prank(address(manager));
-        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-
-        // Verify BandWidthUpdated event was emitted (among potentially other events)
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        bool foundBandWidthEvent = false;
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("BandWidthUpdated(bytes32,uint256,int24,int24)")) {
-                foundBandWidthEvent = true;
-                break;
-            }
-        }
-        assertTrue(foundBandWidthEvent, "BandWidthUpdated event should be emitted");
-
-        // Verify band width can be retrieved via getRangeStatus
-        (,, uint256 bandWidth) = hook.getRangeStatus(key.toId());
-        assertGt(bandWidth, 0, "Band width should be greater than 0");
-    }
-
-    function test_rangeStatus_api() public {
-        // Test getRangeStatus and checkSoftZone APIs
-        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
-        uint160 basePrice = uint160(1 << 96);
-
-        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
-        manager.setDefaultSlotData(slot);
-
-        vm.prank(address(manager));
-        hook.afterInitialize(address(this), key, basePrice, int24(0));
-
-        // Test with insufficient observations (<24)
-        (bool isOutOfBands, bool isInSoftZone, uint256 bandWidth) = hook.getRangeStatus(key.toId());
-        assertEq(isOutOfBands, false, "Should not be out of bands with insufficient data");
-        assertEq(isInSoftZone, false, "Should not be in soft zone with insufficient data");
-        assertEq(bandWidth, 0, "Band width should be 0 with insufficient data");
-
-        SwapParams memory params = SwapParams(true, 1000, 0);
-
-        // Add 24+ observations
-        for (uint256 i = 1; i <= 25; i++) {
-            skip(1 hours);
-            uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
-            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
-            manager.setDefaultSlotData(newSlot);
-            vm.prank(address(manager));
-            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
-        }
-
-        // Test with sufficient observations (≥24)
-        (isOutOfBands, isInSoftZone, bandWidth) = hook.getRangeStatus(key.toId());
-
-        // Verify the APIs return valid data
-        assertTrue(isOutOfBands || !isOutOfBands, "isOutOfBands should be valid boolean");
-        assertTrue(isInSoftZone || !isInSoftZone, "isInSoftZone should be valid boolean");
-        assertGt(bandWidth, 0, "Band width should be > 0 with sufficient data");
-
-        // Test checkSoftZone with sufficient data
-        (bool softZone, bool above) = hook.checkSoftZone(key.toId());
-        assertTrue(softZone || !softZone, "checkSoftZone should return valid boolean");
-        assertTrue(above || !above, "isAbove should return valid boolean");
-    }
+    // Bollinger Bands tests removed - feature not implemented in simplified version
 
 }
