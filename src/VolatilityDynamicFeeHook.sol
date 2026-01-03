@@ -11,6 +11,7 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {ObservationLibrary} from "./libraries/ObservationLibrary.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -184,18 +185,28 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
             if (lastPrice > 0) {
                 // 新しい価格と最後の価格の変動率を計算
+                // FullMath.mulDiv を使ってオーバーフロー安全に計算
                 uint256 currSqrt = uint256(sqrtPriceX96);
                 uint256 prevSqrt = uint256(lastPrice);
 
+                // price = sqrtPrice^2 なので、変動率 = |currPrice - prevPrice| / prevPrice
+                //                                    = |currSqrt^2 - prevSqrt^2| / prevSqrt^2
+                // 因数分解: = |(currSqrt + prevSqrt)(currSqrt - prevSqrt)| / prevSqrt^2
+                // 段階的に除算: = ((currSqrt + prevSqrt) * diff / prevSqrt) * 10000 / prevSqrt
+                // 両方の除算で切り上げ (mulDivRoundingUp) で保守的に評価
                 uint256 priceChange;
                 if (currSqrt > prevSqrt) {
-                    uint256 numerator = (currSqrt + prevSqrt) * (currSqrt - prevSqrt);
-                    uint256 denominator = prevSqrt * prevSqrt;
-                    priceChange = (numerator * 10000) / denominator;
+                    uint256 diff = currSqrt - prevSqrt;
+                    // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
+                    uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
+                    // temp * 10000 / prevSqrt (切り上げ)
+                    priceChange = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
                 } else {
-                    uint256 numerator = (currSqrt + prevSqrt) * (prevSqrt - currSqrt);
-                    uint256 denominator = prevSqrt * prevSqrt;
-                    priceChange = (numerator * 10000) / denominator;
+                    uint256 diff = prevSqrt - currSqrt;
+                    // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
+                    uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
+                    // temp * 10000 / prevSqrt (切り上げ)
+                    priceChange = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
                 }
 
                 // 50%以上の変動を拒否

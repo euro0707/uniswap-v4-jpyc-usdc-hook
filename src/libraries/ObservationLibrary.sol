@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
+
 /// @title ObservationLibrary
 /// @notice Price observation data structure for time-series analysis
 library ObservationLibrary {
@@ -123,15 +125,21 @@ library ObservationLibrary {
             // 変動率 = |currPrice - prevPrice| / prevPrice
             //       = |currSqrt^2 - prevSqrt^2| / prevSqrt^2
             //       = |(currSqrt + prevSqrt)(currSqrt - prevSqrt)| / prevSqrt^2
+            // 段階的に除算: = ((currSqrt + prevSqrt) * diff / prevSqrt) * 10000 / prevSqrt
+            // 両方の除算で切り上げ (mulDivRoundingUp) で保守的に評価
             uint256 change;
             if (currSqrt > prevSqrt) {
-                uint256 numerator = (currSqrt + prevSqrt) * (currSqrt - prevSqrt);
-                uint256 denominator = prevSqrt * prevSqrt;
-                change = (numerator * 10000) / denominator;
+                uint256 diff = currSqrt - prevSqrt;
+                // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
+                uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
+                // temp * 10000 / prevSqrt (切り上げ)
+                change = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
             } else {
-                uint256 numerator = (currSqrt + prevSqrt) * (prevSqrt - currSqrt);
-                uint256 denominator = prevSqrt * prevSqrt;
-                change = (numerator * 10000) / denominator;
+                uint256 diff = prevSqrt - currSqrt;
+                // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
+                uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
+                // temp * 10000 / prevSqrt (切り上げ)
+                change = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
             }
 
             if (change > maxChange) {
