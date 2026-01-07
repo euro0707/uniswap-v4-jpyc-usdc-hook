@@ -34,6 +34,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     // プールごとの状態管理
     mapping(PoolId => ObservationLibrary.RingBuffer) public observations;
     mapping(PoolId => bool) public circuitBreakerTriggered;
+    mapping(PoolId => uint256) public circuitBreakerActivatedAt;
 
     // 設定パラメータ（USDC/JPYC = USD/JPY為替ペア向け最適化）
     // USDC/JPYCは実質的にドル円レートを反映するため、通常の為替ボラティリティ（0.5-1.5%/日）を想定
@@ -41,13 +42,14 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     uint24 public constant BASE_FEE = 300;          // 基本手数料 0.03% (300 = 0.03%) - 為替ペア標準
     uint24 public constant MAX_FEE = 5000;          // 最大手数料 0.5% (5000 = 0.5%) - 急変時保護
     uint256 public constant VOLATILITY_THRESHOLD = 500; // ボラティリティの閾値
-    uint256 public constant MIN_UPDATE_INTERVAL = 1 hours; // Codex版: 1時間間隔で観測を記録
+    uint256 public constant MIN_UPDATE_INTERVAL = 10 minutes; // 観測記録の最小間隔（セキュリティ強化版）
     uint256 public constant MAX_PRICE_CHANGE_BPS = 5000; // 最大価格変動 50% (5000 = 50%)
 
     // セキュリティパラメータ
     uint256 public constant MIN_BLOCK_SPAN = 3;     // 最小ブロック数（フラッシュローン攻撃防止）
     uint256 public constant PRICE_CHANGE_LOOKBACK = 10; // 価格変動チェックの観測数
     uint256 public constant CIRCUIT_BREAKER_THRESHOLD = 1000; // サーキットブレーカー閾値 10% (1000 = 10%)
+    uint256 public constant CIRCUIT_BREAKER_COOLDOWN = 1 hours; // サーキットブレーカー自動リセット時間
 
     // イベント定義
     event ObservationRecorded(
@@ -73,7 +75,17 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         PoolId indexed poolId
     );
 
-    constructor(IPoolManager _poolManager, address _owner) BaseHook(_poolManager) Ownable(_owner) {}
+    event CircuitBreakerAutoReset(
+        PoolId indexed poolId
+    );
+
+    event DynamicFeeCalculated(
+        PoolId indexed poolId,
+        uint256 volatility,
+        uint24 fee
+    );
+
+    constructor(IPoolManager _poolManager, address initialOwner) BaseHook(_poolManager) Ownable(initialOwner) {}
 
     /// @notice Hookの権限設定
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
@@ -128,9 +140,15 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     ) internal override whenNotPaused returns (bytes4, BeforeSwapDelta, uint24) {
         PoolId poolId = key.toId();
 
-        // サーキットブレーカーチェック
+        // サーキットブレーカーチェック（自動リセット付き）
         if (circuitBreakerTriggered[poolId]) {
-            revert CircuitBreakerTriggered();
+            // 自動リセット: クールダウン時間経過後に自動解除
+            if (block.timestamp >= circuitBreakerActivatedAt[poolId] + CIRCUIT_BREAKER_COOLDOWN) {
+                circuitBreakerTriggered[poolId] = false;
+                emit CircuitBreakerAutoReset(poolId);
+            } else {
+                revert CircuitBreakerTriggered();
+            }
         }
 
         // ボラティリティを計算
@@ -138,6 +156,9 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         // ボラティリティに基づいて手数料を決定
         uint24 fee = _getFeeBasedOnVolatility(volatility);
+
+        // イベント発行（監視とデバッグ用）
+        emit DynamicFeeCalculated(poolId, volatility, fee);
 
         // 手数料を更新（OVERRIDE_FEE_FLAGを設定）
         uint24 feeWithFlag = fee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
@@ -155,7 +176,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     ) internal override returns (bytes4, int128) {
         PoolId poolId = key.toId();
 
-        // 最小更新間隔チェック（1時間）
+        // 最小更新間隔チェック（10分）
         ObservationLibrary.RingBuffer storage obs = observations[poolId];
         if (obs.count > 0) {
             uint256 lastIndex = (obs.index + 99) % 100;
@@ -199,26 +220,29 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
                     uint256 diff = currSqrt - prevSqrt;
                     // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
                     uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
-                    // temp * 10000 / prevSqrt (切り上げ)
-                    priceChange = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
+                    // temp * 10000 / prevSqrt (通常除算で過大評価を防ぐ)
+                    priceChange = FullMath.mulDiv(temp, 10000, prevSqrt);
                 } else {
                     uint256 diff = prevSqrt - currSqrt;
                     // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
                     uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
-                    // temp * 10000 / prevSqrt (切り上げ)
-                    priceChange = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
+                    // temp * 10000 / prevSqrt (通常除算で過大評価を防ぐ)
+                    priceChange = FullMath.mulDiv(temp, 10000, prevSqrt);
                 }
 
-                // 50%以上の変動を拒否
+                // 50%以上の変動を即座に拒否（最優先）
                 if (priceChange > MAX_PRICE_CHANGE_BPS) {
                     emit PriceManipulationAttempt(poolId, priceChange, obs.count);
                     revert PriceManipulationDetected();
                 }
 
-                // 10%以上の変動でサーキットブレーカー
+                // 10%以上50%未満の変動でサーキットブレーカー
                 if (priceChange > CIRCUIT_BREAKER_THRESHOLD && !circuitBreakerTriggered[poolId]) {
                     circuitBreakerTriggered[poolId] = true;
+                    circuitBreakerActivatedAt[poolId] = block.timestamp;
                     emit CircuitBreakerActivated(poolId, priceChange, sqrtPriceX96);
+                    // 異常価格（10-50%変動）は観測履歴に記録しない（ボラティリティ計算の汚染を防ぐ）
+                    return (BaseHook.afterSwap.selector, 0);
                 }
             }
         }
@@ -243,6 +267,18 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             return 0;
         }
 
+        // 有効な観測数を事前にカウント
+        uint256 validObservations = 0;
+        for (uint256 i = 0; i < count; i++) {
+            if (obs.data[i].sqrtPriceX96 > 0 && obs.data[i].timestamp > 0) {
+                validObservations++;
+            }
+        }
+
+        if (validObservations < 2) {
+            return 0;  // 有効な観測が不足
+        }
+
         // 時間重み付き価格変動率の合計を計算
         uint256 weightedVariation = 0;
         uint256 totalWeight = 0;
@@ -261,11 +297,18 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
                 continue;
             }
 
-            // 時間の重み: 時間差を使用（短時間の変動ほど重要度を下げる）
+            // 時間の重み: 最近の観測に指数関数的に高い重みを付与
+            // recencyWeight = 2^(count - i) で最新ほど重くする
+            uint256 recencyWeight = 1 << (count > i + 10 ? 10 : count - i - 1); // Cap at 2^10 to prevent overflow
             uint256 timeDelta = current.timestamp - previous.timestamp;
 
-            // 最小重みを1に設定（ゼロ除算防止）
-            uint256 weight = timeDelta > 0 ? timeDelta : 1;
+            // 時間重みに上限を設定（長時間の観測が支配的にならないよう）
+            uint256 MAX_TIME_WEIGHT = 1 hours;
+            uint256 timeWeight = timeDelta > MAX_TIME_WEIGHT ? MAX_TIME_WEIGHT : timeDelta;
+            timeWeight = timeWeight > 0 ? timeWeight : 1;
+
+            // 合成重み = recencyWeight * timeWeight
+            uint256 weight = recencyWeight * timeWeight;
 
             // sqrtPriceX96を使って変動を計算（絶対値）
             uint256 curSqrt = uint256(current.sqrtPriceX96);
@@ -277,8 +320,19 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
                 variation = ((prevSqrt - curSqrt) * 10000) / prevSqrt;
             }
 
-            // 時間重み付き変動を加算
-            weightedVariation += variation * weight;
+            // 時間重み付き変動を加算（オーバーフローチェック付き）
+            uint256 weightedTerm = variation * weight;
+
+            // オーバーフローチェック: 加算前と加算後を比較
+            uint256 newWeightedVariation = weightedVariation + weightedTerm;
+            if (newWeightedVariation < weightedVariation) {
+                // オーバーフロー検出 → 最大値でキャップして終了
+                weightedVariation = type(uint256).max / 2; // 除算を考慮して半分に
+                totalWeight = totalWeight > 0 ? totalWeight : 1; // ゼロ除算防止
+                break;
+            }
+
+            weightedVariation = newWeightedVariation;
             totalWeight += weight;
             currentIndex = prevIndex;
         }
@@ -347,14 +401,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         }
 
         return sortedPrices;
-    }
-
-    /// @notice Get current tick for pool
-    /// @param poolId プールID
-    /// @return 現在のtick値
-    function _getCurrentTick(PoolId poolId) internal view returns (int24) {
-        (, int24 tick,,) = poolManager.getSlot0(poolId);
-        return tick;
     }
 
     /// @notice Reset circuit breaker (owner only)

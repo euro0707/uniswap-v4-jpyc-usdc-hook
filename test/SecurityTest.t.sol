@@ -94,7 +94,7 @@ contract SecurityTest is Test {
         // 同じブロック内で複数の観測を追加しようとする（フラッシュローン攻撃のシミュレーション）
         // vm.rollを使わずに時間だけ進める
         for (uint256 i = 1; i <= 5; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             // ブロック番号は進めない（すべて同じブロック）
             uint160 newPrice = basePrice + uint160((basePrice * i * 10) / 100);
             bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 10)), uint24(0), uint24(3000));
@@ -105,7 +105,7 @@ contract SecurityTest is Test {
 
         // validateMultiBlockがfalseを返すことを確認
         // PriceManipulationAttemptイベントが発行されることを期待（正確な値は計算されるため、イベントの存在だけチェック）
-        skip(1 hours);
+        skip(10 minutes);
         uint160 attackPrice = basePrice + uint160((basePrice * 60) / 100);
         bytes32 attackSlot = encodeSlot0(attackPrice, int24(60), uint24(0), uint24(3000));
         manager.setDefaultSlotData(attackSlot);
@@ -147,7 +147,7 @@ contract SecurityTest is Test {
 
         // 複数ブロックにわたる正常な取引
         for (uint256 i = 1; i <= 10; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(i + 1); // ブロック番号を進める
             uint160 newPrice = basePrice + uint160((basePrice * i * 3) / 100);
             bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
@@ -181,7 +181,7 @@ contract SecurityTest is Test {
 
         // 正常な観測を構築
         for (uint256 i = 1; i <= 10; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(i + 1);
             uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
             bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
@@ -191,7 +191,7 @@ contract SecurityTest is Test {
         }
 
         // 異常な価格変動（70%）を試みる
-        skip(1 hours);
+        skip(10 minutes);
         vm.roll(12);
         uint160 currentPrice = basePrice + uint160((basePrice * 20) / 100);
         uint160 extremePrice = currentPrice + uint160((currentPrice * 70) / 100);
@@ -229,7 +229,7 @@ contract SecurityTest is Test {
 
         // 正常な観測を構築
         for (uint256 i = 1; i <= 10; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(i + 1);
             uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
             bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
@@ -239,7 +239,7 @@ contract SecurityTest is Test {
         }
 
         // 15%の価格変動を引き起こす（サーキットブレーカー閾値の10%を超える）
-        skip(1 hours);
+        skip(10 minutes);
         vm.roll(12);
         uint160 currentPrice = basePrice + uint160((basePrice * 10) / 100);
         uint160 volatilePrice = currentPrice + uint160((currentPrice * 15) / 100);
@@ -257,7 +257,7 @@ contract SecurityTest is Test {
         assertTrue(hook.isCircuitBreakerTriggered(key.toId()), "Circuit breaker should be triggered");
 
         // 次のスワップは拒否される
-        skip(1 hours);
+        skip(10 minutes);
         vm.roll(13);
         bytes32 nextSlot = encodeSlot0(volatilePrice, int24(100), uint24(0), uint24(3000));
         manager.setDefaultSlotData(nextSlot);
@@ -412,7 +412,7 @@ contract SecurityTest is Test {
 
         // 1. 正常な観測を構築（複数ブロック検証をパス）
         for (uint256 i = 1; i <= 10; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(i + 1);
             uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
             bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
@@ -422,7 +422,7 @@ contract SecurityTest is Test {
         }
 
         // 2. サーキットブレーカーが発動するレベルの価格変動（15%）
-        skip(1 hours);
+        skip(10 minutes);
         vm.roll(12);
         uint160 currentPrice = basePrice + uint160((basePrice * 20) / 100);
         uint160 volatilePrice = currentPrice + uint160((currentPrice * 15) / 100);

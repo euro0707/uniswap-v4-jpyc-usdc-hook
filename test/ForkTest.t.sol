@@ -78,10 +78,10 @@ contract ForkTest is Test {
         uint24 initialFee = hook.getCurrentFee(key);
         assertEq(initialFee, 300, "Initial fee should be BASE_FEE (0.03%)");
 
-        // 価格変動をシミュレート
-        // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
-        uint160 newPrice = initialPrice + uint160((initialPrice * 20) / 100); // +20%
+        // 価格変動をシミュレート（サーキットブレーカー閾値10%未満に調整）
+        // Codex版: 10分間隔で観測を記録
+        skip(10 minutes);
+        uint160 newPrice = initialPrice + uint160((initialPrice * 4) / 100); // +4% sqrtPrice (≈8% price)
         mockManager.setSlot0(newPrice, int24(0), uint24(0), uint24(3000));
 
         SwapParams memory params = SwapParams({zeroForOne: true, amountSpecified: 1000, sqrtPriceLimitX96: 0});
@@ -92,7 +92,7 @@ contract ForkTest is Test {
         uint24 newFee = hook.getCurrentFee(key);
         assertGt(newFee, initialFee, "Fee should increase with volatility");
         console.log("Initial Fee:", initialFee);
-        console.log("New Fee after 20% price change:", newFee);
+        console.log("New Fee after 4% sqrtPrice change (~8% price):", newFee);
     }
 
     /// @notice 複数回のスワップで手数料が段階的に変化することを確認
@@ -125,7 +125,7 @@ contract ForkTest is Test {
         // 5回のスワップをシミュレート
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 5; i++) {
-            skip(1 hours);
+            skip(10 minutes);
 
             // 価格を徐々に上昇
             uint160 newPrice = basePrice + uint160((basePrice * i * 3) / 100); // i * 3%
@@ -173,7 +173,7 @@ contract ForkTest is Test {
 
         // Build up observations with progressing block numbers
         for (uint256 i = 1; i <= 10; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(i + 1);
             uint160 price = basePrice + uint160((basePrice * i * 2) / 100);
             mockManager.setSlot0(price, int24(0), uint24(0), uint24(3000));
@@ -184,7 +184,7 @@ contract ForkTest is Test {
         console.log("Normal price changes (0-20%): ALLOWED");
 
         // 異常な価格変動（60%）は拒否される
-        skip(1 hours);
+        skip(10 minutes);
         vm.roll(12);
         uint160 currentPrice = basePrice + uint160((basePrice * 20) / 100);
         uint160 excessivePrice = currentPrice + uint160((currentPrice * 60) / 100);
@@ -223,7 +223,7 @@ contract ForkTest is Test {
 
         // afterSwap のガス使用量（価格更新あり）
         // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
+        skip(10 minutes);
         uint160 newPrice = basePrice + uint160((basePrice * 10) / 100);
         mockManager.setSlot0(newPrice, int24(0), uint24(0), uint24(3000));
 

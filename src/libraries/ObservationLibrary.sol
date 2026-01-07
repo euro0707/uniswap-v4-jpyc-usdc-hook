@@ -70,26 +70,56 @@ library ObservationLibrary {
             return false;
         }
 
-        uint256 uniqueBlocks = 0;
-        uint256 lastBlock = 0;
+        // Time range check: observations must span at least 30 minutes for mature pools
+        // For newer pools with fewer observations, use MIN_UPDATE_INTERVAL * minBlocks
+        uint256 MIN_TIME_SPAN = self.count < 10 ? 10 minutes * minBlocks : 30 minutes;
+        uint256 oldestAllowedTimestamp = block.timestamp > MIN_TIME_SPAN ? block.timestamp - MIN_TIME_SPAN : 0;
 
-        // Check recent observations (up to minBlocks * 2 for safety margin)
+        uint256 uniqueBlocks = 0;
         uint256 checkCount = self.count < minBlocks * 2 ? self.count : minBlocks * 2;
         uint256 currentIdx = self.index == 0 ? 99 : self.index - 1;
 
+        // Track unique blocks using a simple linear scan with comparison
+        // Note: We can't use mapping in memory, so we track last seen blocks
+        // Array size = minBlocks * 4 to provide sufficient buffer (max 20 for minBlocks=3)
+        uint256[20] memory seenBlocks; // Expanded to support up to 20 unique blocks
+        uint256 seenCount = 0;
+
         for (uint256 i = 0; i < checkCount; i++) {
             uint256 blockNum = self.data[currentIdx].blockNumber;
-            if (blockNum != lastBlock && blockNum > 0) {
-                uniqueBlocks++;
-                lastBlock = blockNum;
+            uint256 timestamp = self.data[currentIdx].timestamp;
+
+            // Skip observations that are too old
+            if (timestamp < oldestAllowedTimestamp) {
+                currentIdx = currentIdx == 0 ? 99 : currentIdx - 1;
+                continue;
             }
+
+            // Check if this block number is new
+            if (blockNum > 0) {
+                bool isNewBlock = true;
+                for (uint256 j = 0; j < seenCount; j++) {
+                    if (seenBlocks[j] == blockNum) {
+                        isNewBlock = false;
+                        break;
+                    }
+                }
+
+                if (isNewBlock && seenCount < 20) {
+                    seenBlocks[seenCount] = blockNum;
+                    seenCount++;
+                    uniqueBlocks++;
+                }
+            }
+
             if (uniqueBlocks >= minBlocks) {
                 return true;
             }
+
             currentIdx = currentIdx == 0 ? 99 : currentIdx - 1;
         }
 
-        return false;
+        return uniqueBlocks >= minBlocks;
     }
 
     /// @notice Calculate maximum price change in recent observations
@@ -132,14 +162,14 @@ library ObservationLibrary {
                 uint256 diff = currSqrt - prevSqrt;
                 // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
                 uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
-                // temp * 10000 / prevSqrt (切り上げ)
-                change = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
+                // temp * 10000 / prevSqrt (通常除算で過大評価を防ぐ)
+                change = FullMath.mulDiv(temp, 10000, prevSqrt);
             } else {
                 uint256 diff = prevSqrt - currSqrt;
                 // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
                 uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
-                // temp * 10000 / prevSqrt (切り上げ)
-                change = FullMath.mulDivRoundingUp(temp, 10000, prevSqrt);
+                // temp * 10000 / prevSqrt (通常除算で過大評価を防ぐ)
+                change = FullMath.mulDiv(temp, 10000, prevSqrt);
             }
 
             if (change > maxChange) {

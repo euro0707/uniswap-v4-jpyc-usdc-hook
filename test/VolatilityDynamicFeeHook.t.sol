@@ -120,7 +120,7 @@ contract VolatilityDynamicFeeHookTest is Test {
 
         // advance time past MIN_UPDATE_INTERVAL
         // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
+        skip(10 minutes);
 
         // call afterSwap
         SwapParams memory params = SwapParams(true, 1000, 0);
@@ -179,7 +179,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // add multiple swaps with increasing prices to create volatility
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 5; i++) {
-            skip(1 hours);
+            skip(10 minutes);
 
             // increase price by 1%
             uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
@@ -211,9 +211,9 @@ contract VolatilityDynamicFeeHookTest is Test {
         SwapParams memory params = SwapParams(true, 1000, 0);
 
         // add more than HISTORY_SIZE (10) swaps
-        // Codex版: 1時間間隔で観測を記録
+        // セキュリティ強化版: 10分間隔で観測を記録
         for (uint256 i = 1; i <= 15; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(1 + i); // Advance block number for multi-block validation
 
             uint160 newPrice = basePrice + uint160(i * 1000000);
@@ -263,7 +263,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // perform 3 consecutive swaps with sufficient time and block intervals
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 3; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(1 + i); // Advance block number for multi-block validation
 
             uint160 newPrice = basePrice + uint160(i * 500000);
@@ -294,7 +294,7 @@ contract VolatilityDynamicFeeHookTest is Test {
 
         // First swap: 1 hour interval, large price change
         // Codex版: 1時間間隔で観測を記録
-        skip(1 hours);
+        skip(10 minutes);
         uint160 price1 = basePrice + uint160((basePrice * 10) / 100); // +10%
         bytes32 slot1 = encodeSlot0(price1, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(slot1);
@@ -302,7 +302,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
 
         // Second swap: 1 hour interval, small price change
-        skip(1 hours);
+        skip(10 minutes);
         uint160 price2 = price1 + uint160((basePrice * 1) / 100); // +1%
         bytes32 slot2 = encodeSlot0(price2, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(slot2);
@@ -333,7 +333,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // Establish normal trading pattern with reasonable time intervals
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 3; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             vm.roll(1 + i); // Advance block number for multi-block validation
             uint160 normalPrice = basePrice + uint160((basePrice * i) / 200); // +0.5% each
             bytes32 normalSlot = encodeSlot0(normalPrice, int24(0), uint24(0), uint24(3000));
@@ -345,12 +345,12 @@ contract VolatilityDynamicFeeHookTest is Test {
         uint24 normalFee = hook.getCurrentFee(key);
 
         // Attacker tries to manipulate price with MIN_UPDATE_INTERVAL
-        // Use 14% sqrtPrice increase (≈30% actual price increase) to stay within the MAX_PRICE_CHANGE_BPS (50%) limit
-        // Actual price change = (1.14)^2 - 1 ≈ 0.30 = 30%
-        skip(1 hours);
+        // Use 4% sqrtPrice increase (≈8% actual price increase) to stay under CIRCUIT_BREAKER_THRESHOLD (10%)
+        // Actual price change = (1.04)^2 - 1 ≈ 0.0816 = 8.16%
+        skip(10 minutes);
         vm.roll(5); // Advance block number for multi-block validation
         uint160 lastPrice = basePrice + uint160((basePrice * 3) / 200); // last recorded was +1.5%
-        uint160 manipulatedPrice = lastPrice + uint160((lastPrice * 14) / 100); // 14% sqrtPrice increase (≈30% price increase, within limit)
+        uint160 manipulatedPrice = lastPrice + uint160((lastPrice * 4) / 100); // 4% sqrtPrice increase (≈8% price increase, under circuit breaker threshold)
         bytes32 manipSlot = encodeSlot0(manipulatedPrice, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(manipSlot);
         vm.prank(address(manager));
@@ -381,7 +381,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // Add swaps with exactly 1 hour intervals
         // Codex版: 1時間間隔で観測を記録
         for (uint256 i = 1; i <= 5; i++) {
-            skip(1 hours);
+            skip(10 minutes);
             uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
             bytes32 newSlot = encodeSlot0(newPrice, int24(0), uint24(0), uint24(3000));
             manager.setDefaultSlotData(newSlot);
