@@ -50,6 +50,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     uint256 public constant PRICE_CHANGE_LOOKBACK = 10; // 価格変動チェックの観測数
     uint256 public constant CIRCUIT_BREAKER_THRESHOLD = 1000; // サーキットブレーカー閾値 10% (1000 = 10%)
     uint256 public constant CIRCUIT_BREAKER_COOLDOWN = 1 hours; // サーキットブレーカー自動リセット時間
+    uint256 public constant STALENESS_THRESHOLD = 30 minutes; // 観測データが古いと判断する閾値
 
     // イベント定義
     event ObservationRecorded(
@@ -77,6 +78,12 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
     event CircuitBreakerAutoReset(
         PoolId indexed poolId
+    );
+
+    event ObservationRingReset(
+        PoolId indexed poolId,
+        uint256 oldCount,
+        uint256 stalenessThreshold
     );
 
     event DynamicFeeCalculated(
@@ -188,6 +195,18 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         // 現在価格を取得
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+
+        // Staleness チェック: 長期無取引後のリカバリ
+        // 全観測が STALENESS_THRESHOLD (30分) より古い場合、リングをリセット
+        if (ObservationLibrary.isStale(obs, STALENESS_THRESHOLD)) {
+            uint256 oldCount = obs.count;
+            ObservationLibrary.reset(obs);
+            emit ObservationRingReset(poolId, oldCount, STALENESS_THRESHOLD);
+            // リセット後は新しい観測を記録して終了（セキュリティチェックをスキップ）
+            ObservationLibrary.push(obs, block.timestamp, sqrtPriceX96);
+            emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
+            return (BaseHook.afterSwap.selector, 0);
+        }
 
         // セキュリティチェック1: 複数ブロック検証
         if (obs.count >= MIN_BLOCK_SPAN) {

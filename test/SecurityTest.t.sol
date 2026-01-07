@@ -48,6 +48,20 @@ contract SecurityTest is Test {
     address owner;
     address attacker;
 
+    // イベント定義（テスト用）
+    event ObservationRingReset(
+        PoolId indexed poolId,
+        uint256 oldCount,
+        uint256 stalenessThreshold
+    );
+
+    event ObservationRecorded(
+        PoolId indexed poolId,
+        uint256 timestamp,
+        uint160 sqrtPriceX96,
+        uint256 observationCount
+    );
+
     function setUp() public {
         manager = new MockPoolManager();
         owner = address(this);
@@ -454,5 +468,123 @@ contract SecurityTest is Test {
         vm.prank(address(manager));
         (bytes4 selector,,) = hook.beforeSwap(address(this), key, params, bytes(""));
         assertEq(selector, BaseHook.beforeSwap.selector);
+    }
+
+    /// @notice 長期無取引後のstaleness回復を確認
+    function test_security_stalenessRecovery() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // 正常な観測を構築（10分ごとに10回）
+        for (uint256 i = 1; i <= 10; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i * 3) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // 35分間（STALENESS_THRESHOLD=30分を超える）取引なし
+        skip(35 minutes);
+        vm.roll(20);
+
+        // 新しい価格で取引を実行（staleness回復のはず）
+        uint160 recoveryPrice = basePrice + uint160((basePrice * 5) / 100);
+        bytes32 recoverySlot = encodeSlot0(recoveryPrice, int24(50), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(recoverySlot);
+
+        // ObservationRingReset イベントと ObservationRecorded イベントの発火を期待
+        vm.expectEmit(true, false, false, false);
+        emit ObservationRingReset(key.toId(), 10, 30 minutes);
+
+        vm.expectEmit(true, false, false, false);
+        emit ObservationRecorded(key.toId(), block.timestamp, recoveryPrice, 1);
+
+        // staleness回復が機能することを確認
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+    }
+
+    /// @notice サーキットブレーカー自動リセットを確認
+    function test_security_circuitBreakerAutoReset() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // 正常な観測を構築
+        for (uint256 i = 1; i <= 10; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // 12%の価格変動でサーキットブレーカー発動（10%超）
+        skip(10 minutes);
+        vm.roll(15);
+        uint160 abnormalPrice = basePrice + uint160((basePrice * 6) / 100); // ~12% actual price change
+        bytes32 abnormalSlot = encodeSlot0(abnormalPrice, int24(60), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(abnormalSlot);
+
+        // サーキットブレーカーが発動して観測記録はスキップされる
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // サーキットブレーカーが発動していることを確認
+        assertTrue(hook.circuitBreakerTriggered(key.toId()), "Circuit breaker should be triggered");
+
+        // 次のスワップはCIRCUIT_BREAKER_COOLDOWN (1時間) 以内なので拒否される
+        skip(30 minutes); // 1時間未満
+        vm.prank(address(manager));
+        vm.expectRevert();
+        hook.beforeSwap(address(this), key, params, bytes(""));
+
+        // CIRCUIT_BREAKER_COOLDOWN (1時間) 経過後は自動リセット
+        skip(31 minutes); // 合計61分
+        vm.roll(20);
+
+        // 正常価格に戻る
+        uint160 normalPrice = basePrice + uint160((basePrice * 22) / 100);
+        bytes32 normalSlot = encodeSlot0(normalPrice, int24(110), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(normalSlot);
+
+        // 自動リセットされているのでスワップは成功するはず
+        vm.prank(address(manager));
+        hook.beforeSwap(address(this), key, params, bytes(""));
+
+        // サーキットブレーカーがリセットされていることを確認
+        assertFalse(hook.circuitBreakerTriggered(key.toId()), "Circuit breaker should be auto-reset");
     }
 }

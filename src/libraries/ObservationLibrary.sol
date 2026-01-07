@@ -57,6 +57,42 @@ library ObservationLibrary {
         }
     }
     
+    /// @notice Check if all observations are stale (older than threshold)
+    /// @dev Used to detect long periods of inactivity and trigger ring reset
+    /// @param self Ring buffer of observations
+    /// @param stalenessThreshold Time threshold in seconds (e.g., 30 minutes)
+    /// @return isStale True if all observations are older than threshold
+    function isStale(
+        RingBuffer storage self,
+        uint256 stalenessThreshold
+    ) internal view returns (bool) {
+        if (self.count == 0) {
+            return true; // Empty ring is considered stale
+        }
+
+        uint256 oldestAllowedTimestamp = block.timestamp > stalenessThreshold
+            ? block.timestamp - stalenessThreshold
+            : 0;
+
+        // Check if all observations are older than threshold
+        for (uint256 i = 0; i < self.count; i++) {
+            if (self.data[i].timestamp >= oldestAllowedTimestamp) {
+                return false; // Found at least one fresh observation
+            }
+        }
+
+        return true; // All observations are stale
+    }
+
+    /// @notice Reset ring buffer to accept new observations after staleness
+    /// @dev Clears all existing observations and resets counters
+    /// @param self Ring buffer of observations
+    function reset(RingBuffer storage self) internal {
+        self.index = 0;
+        self.count = 0;
+        // Note: No need to clear data array, as it will be overwritten
+    }
+
     /// @notice Validate that recent observations span multiple blocks
     /// @dev Prevents single-block price manipulation attacks
     /// @param self Ring buffer of observations
