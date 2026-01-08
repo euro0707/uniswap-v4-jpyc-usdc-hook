@@ -510,10 +510,11 @@ contract SecurityTest is Test {
         manager.setDefaultSlotData(recoverySlot);
 
         // ObservationRingReset イベントと ObservationRecorded イベントの発火を期待
-        vm.expectEmit(true, false, false, false);
-        emit ObservationRingReset(key.toId(), 10, 30 minutes);
+        // checkData=true で payload も検証（Codex advisory issue 対応）
+        vm.expectEmit(true, false, false, true, address(hook));
+        emit ObservationRingReset(key.toId(), 11, 30 minutes); // oldCount=11 (初期1件 + 10回)
 
-        vm.expectEmit(true, false, false, false);
+        vm.expectEmit(true, false, false, true, address(hook));
         emit ObservationRecorded(key.toId(), block.timestamp, recoveryPrice, 1);
 
         // staleness回復が機能することを確認
