@@ -18,3 +18,7 @@ runs = 256
 [rpc_endpoints]
 polygon = "${POLYGON_RPC_URL}"
 mumbai = "${MUMBAI_RPC_URL}"
+sepolia = "${SEPOLIA_RPC_URL}"
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}" }
