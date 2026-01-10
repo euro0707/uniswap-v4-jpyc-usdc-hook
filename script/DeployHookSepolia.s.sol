@@ -4,24 +4,23 @@ pragma solidity ^0.8.26;
 import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {VolatilityDynamicFeeHook} from "../src/VolatilityDynamicFeeHook.sol";
+import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol";
 
 /// @title DeployHookSepolia
-/// @notice Deploy VolatilityDynamicFeeHook to Sepolia Testnet
+/// @notice Deploy VolatilityDynamicFeeHook to Sepolia Testnet using CREATE2
+/// @dev Uses HookMiner to find a salt that produces a hook address with required permission flags
 contract DeployHookSepolia is Script {
     // Sepolia Testnet addresses (Uniswap V4)
     address constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
 
-    // Test tokens on Sepolia (ERC-20 tokens for testing)
-    // Note: You'll need to deploy or use existing test tokens
-    address constant TOKEN0 = address(0); // TODO: Set test token0 address
-    address constant TOKEN1 = address(0); // TODO: Set test token1 address
+    // CREATE2 Deployer Proxy (standard across all chains)
+    address constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-
-        vm.startBroadcast(deployerPrivateKey);
 
         console.log("=== Deploying VolatilityDynamicFeeHook on Sepolia Testnet ===\n");
         console.log("Deployer:", deployer);
@@ -29,19 +28,53 @@ contract DeployHookSepolia is Script {
         console.log("Chain ID: 11155111 (Sepolia)");
         console.log("");
 
-        // Deploy Hook (deployer will be the owner)
-        VolatilityDynamicFeeHook hook = new VolatilityDynamicFeeHook(
+        // Calculate required hook flags based on getHookPermissions()
+        // afterInitialize: true, beforeSwap: true, afterSwap: true
+        uint160 flags = uint160(
+            Hooks.AFTER_INITIALIZE_FLAG |
+            Hooks.BEFORE_SWAP_FLAG |
+            Hooks.AFTER_SWAP_FLAG
+        );
+
+        console.log("=== Mining Hook Address with CREATE2 ===");
+        console.log("Required flags:");
+        console.log("  - AFTER_INITIALIZE_FLAG");
+        console.log("  - BEFORE_SWAP_FLAG");
+        console.log("  - AFTER_SWAP_FLAG");
+        console.log("Mining salt (this may take a moment)...");
+        console.log("");
+
+        // Prepare constructor arguments
+        bytes memory constructorArgs = abi.encode(IPoolManager(POOL_MANAGER), deployer);
+
+        // Mine salt using HookMiner
+        (address hookAddress, bytes32 salt) = HookMiner.find(
+            CREATE2_DEPLOYER,
+            flags,
+            type(VolatilityDynamicFeeHook).creationCode,
+            constructorArgs
+        );
+
+        console.log("Salt found:", vm.toString(salt));
+        console.log("Predicted hook address:", hookAddress);
+        console.log("Address flags match:", uint160(hookAddress) & uint160(0x3FFF) == flags);
+        console.log("");
+
+        // Deploy with CREATE2 using the mined salt
+        vm.startBroadcast(deployerPrivateKey);
+
+        VolatilityDynamicFeeHook hook = new VolatilityDynamicFeeHook{salt: salt}(
             IPoolManager(POOL_MANAGER),
             deployer
         );
 
-        console.log("Hook deployed at:", address(hook));
-        console.log("");
+        // Verify deployment address matches prediction
+        require(address(hook) == hookAddress, "Deployed address does not match prediction");
 
-        // Deployment summary
-        console.log("=== Deployment Summary ===");
-        console.log("Hook Address:", address(hook));
+        console.log("=== Deployment Successful ===");
+        console.log("Hook deployed at:", address(hook));
         console.log("Owner:", deployer);
+        console.log("Deployment matches prediction: YES");
         console.log("");
 
         // Uniswap V4 Periphery Contracts (Sepolia)
