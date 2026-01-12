@@ -51,3 +51,8 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+
+# Codex review artifacts
+.codex_review_output.json
+.codex_review_prompt.txt
+.codex_review_result.json
