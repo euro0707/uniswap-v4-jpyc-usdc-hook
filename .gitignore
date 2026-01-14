@@ -56,3 +56,6 @@ yarn-error.log*
 .codex_review_output.json
 .codex_review_prompt.txt
 .codex_review_result.json
+
+# Allow .claude directory (override global gitignore)
+!.claude/
