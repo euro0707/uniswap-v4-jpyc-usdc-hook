@@ -2,10 +2,8 @@
 cache/
 out/
 
-# Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+# Broadcast logs
+broadcast/
 
 # Dotenv file
 .env
@@ -57,5 +55,9 @@ yarn-error.log*
 .codex_review_prompt.txt
 .codex_review_result.json
 
-# Allow .claude directory (override global gitignore)
-!.claude/
+# Claude Code
+.claude/
+
+# Misc
+nul
+post-mcp-cleanup.md
