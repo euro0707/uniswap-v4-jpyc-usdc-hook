@@ -16,6 +16,8 @@ contract CheckPoolExists is Script {
     address constant POOL_MANAGER = 0x67366782805870060151383F4BbFF9daB53e5cD6;
 
     function run() external view {
+        require(block.chainid == 137, "This script is for Polygon mainnet only (chainId: 137)");
+
         console.log("=== Polygon Mainnet: JPYC/USDC Pool Existence Check ===\n");
 
         // 1. トークンの存在確認

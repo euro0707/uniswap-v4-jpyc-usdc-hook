@@ -35,6 +35,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     mapping(PoolId => ObservationLibrary.RingBuffer) public observations;
     mapping(PoolId => bool) public circuitBreakerTriggered;
     mapping(PoolId => uint256) public circuitBreakerActivatedAt;
+    mapping(PoolId => uint256) public warmupUntil;
 
     // 設定パラメータ（USDC/JPYC = USD/JPY為替ペア向け最適化）
     // USDC/JPYCは実質的にドル円レートを反映するため、通常の為替ボラティリティ（0.5-1.5%/日）を想定
@@ -51,6 +52,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     uint256 public constant CIRCUIT_BREAKER_THRESHOLD = 1000; // サーキットブレーカー閾値 10% (1000 = 10%)
     uint256 public constant CIRCUIT_BREAKER_COOLDOWN = 1 hours; // サーキットブレーカー自動リセット時間
     uint256 public constant STALENESS_THRESHOLD = 30 minutes; // 観測データが古いと判断する閾値
+    uint256 public constant WARMUP_DURATION = 30 minutes; // Staleness リセット後のウォームアップ期間
 
     // イベント定義
     event ObservationRecorded(
@@ -90,6 +92,15 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         PoolId indexed poolId,
         uint256 volatility,
         uint24 fee
+    );
+
+    event WarmupPeriodStarted(
+        PoolId indexed poolId,
+        uint256 until
+    );
+
+    event WarmupPeriodEnded(
+        PoolId indexed poolId
     );
 
     constructor(IPoolManager _poolManager, address initialOwner) BaseHook(_poolManager) Ownable(initialOwner) {}
@@ -158,6 +169,13 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             }
         }
 
+        // ウォームアップ中は BASE_FEE のみを返す（staleness リセット後の保護）
+        if (warmupUntil[poolId] > block.timestamp) {
+            uint24 warmupFee = BASE_FEE | LPFeeLibrary.OVERRIDE_FEE_FLAG;
+            emit DynamicFeeCalculated(poolId, 0, BASE_FEE);
+            return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, warmupFee);
+        }
+
         // ボラティリティを計算
         uint256 volatility = _calculateVolatility(poolId);
 
@@ -205,6 +223,9 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             // リセット後は新しい観測を記録して終了（セキュリティチェックをスキップ）
             ObservationLibrary.push(obs, block.timestamp, sqrtPriceX96);
             emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
+            // ウォームアップ期間を開始（リセット後の手数料操作を防止）
+            warmupUntil[poolId] = block.timestamp + WARMUP_DURATION;
+            emit WarmupPeriodStarted(poolId, warmupUntil[poolId]);
             return (BaseHook.afterSwap.selector, 0);
         }
 

@@ -93,6 +93,8 @@ contract SwapSepolia is Script {
     address constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
 
     function run() external {
+        require(block.chainid == 11155111, "This script is for Sepolia testnet only (chainId: 11155111)");
+
         address token0Addr = vm.envAddress("TOKEN0_ADDRESS");
         address token1Addr = vm.envAddress("TOKEN1_ADDRESS");
         address hookAddr = vm.envAddress("HOOK_ADDRESS");

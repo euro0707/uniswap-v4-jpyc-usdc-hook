@@ -19,6 +19,8 @@ contract DeployHookPolygon is Script {
     address constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     function run() external {
+        require(block.chainid == 137, "This script is for Polygon mainnet only (chainId: 137)");
+
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 

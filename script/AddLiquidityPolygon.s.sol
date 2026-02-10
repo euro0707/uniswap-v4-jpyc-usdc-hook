@@ -30,6 +30,8 @@ contract AddLiquidityPolygon is Script {
     // USDC Native: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359 (6 decimals)
 
     function run() external {
+        require(block.chainid == 137, "This script is for Polygon mainnet only (chainId: 137)");
+
         address token0Addr = vm.envAddress("TOKEN0_ADDRESS");
         address token1Addr = vm.envAddress("TOKEN1_ADDRESS");
         address hookAddr = vm.envAddress("HOOK_ADDRESS");

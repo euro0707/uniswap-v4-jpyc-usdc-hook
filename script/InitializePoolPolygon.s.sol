@@ -25,6 +25,8 @@ contract InitializePoolPolygon is Script {
     address HOOK;
 
     function run() external {
+        require(block.chainid == 137, "This script is for Polygon mainnet only (chainId: 137)");
+
         TOKEN0 = vm.envAddress("TOKEN0_ADDRESS");
         TOKEN1 = vm.envAddress("TOKEN1_ADDRESS");
         HOOK = vm.envAddress("HOOK_ADDRESS");

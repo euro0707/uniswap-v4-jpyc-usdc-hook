@@ -15,6 +15,7 @@ contract DeployHook is Script {
     address constant USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
     
     function run() external {
+        revert("DEPRECATED: Use DeployHookPolygon.s.sol or DeployHookSepolia.s.sol (CREATE2 required for V4 hooks)");
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 

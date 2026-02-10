@@ -26,6 +26,8 @@ contract AddLiquiditySepolia is Script {
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     function run() external {
+        require(block.chainid == 11155111, "This script is for Sepolia testnet only (chainId: 11155111)");
+
         address token0Addr = vm.envAddress("TOKEN0_ADDRESS");
         address token1Addr = vm.envAddress("TOKEN1_ADDRESS");
         address hookAddr = vm.envAddress("HOOK_ADDRESS");

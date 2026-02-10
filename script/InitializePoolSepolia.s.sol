@@ -21,6 +21,8 @@ contract InitializePoolSepolia is Script {
     address HOOK;
 
     function run() external {
+        require(block.chainid == 11155111, "This script is for Sepolia testnet only (chainId: 11155111)");
+
         TOKEN0 = vm.envAddress("TOKEN0_ADDRESS");
         TOKEN1 = vm.envAddress("TOKEN1_ADDRESS");
         HOOK = vm.envAddress("HOOK_ADDRESS");
