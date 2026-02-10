@@ -5,10 +5,12 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -20,6 +22,9 @@ interface IPermit2 {
 /// @title AddLiquiditySepolia
 /// @notice Add liquidity to the USDC/JPYC pool with dynamic fee hook
 contract AddLiquiditySepolia is Script {
+    using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
+
     // Sepolia Uniswap V4
     address constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
     address constant POSITION_MANAGER = 0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4;
@@ -44,8 +49,18 @@ contract AddLiquiditySepolia is Script {
         address currency0 = token0Addr < token1Addr ? token0Addr : token1Addr;
         address currency1 = token0Addr < token1Addr ? token1Addr : token0Addr;
 
+        // Determine decimals from env (Sepolia mock tokens have variable addresses)
+        uint8 decimals0 = uint8(vm.envOr("TOKEN0_DECIMALS", uint256(18)));
+        uint8 decimals1 = uint8(vm.envOr("TOKEN1_DECIMALS", uint256(6)));
+        // Swap decimals if token order was swapped
+        if (token0Addr > token1Addr) {
+            (decimals0, decimals1) = (decimals1, decimals0);
+        }
+
         console.log("Sorted currency0:", currency0);
         console.log("Sorted currency1:", currency1);
+        console.log("Decimals0:", decimals0);
+        console.log("Decimals1:", decimals1);
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -73,12 +88,14 @@ contract AddLiquiditySepolia is Script {
         int24 tickLower = (TickMath.MIN_TICK / 60) * 60;
         int24 tickUpper = (TickMath.MAX_TICK / 60) * 60;
 
-        // Amount of liquidity to add
-        // currency0 = JPYC (0x6A6cdC..., 18 decimals, lower address)
-        // currency1 = USDC (0xD58CA7..., 6 decimals, higher address)
-        // For testing: 1,000 of each token
-        uint256 amount0Max = 1_000 * 10**18;  // 1,000 JPYC (18 decimals)
-        uint256 amount1Max = 1_000 * 10**6;   // 1,000 USDC (6 decimals)
+        // Verify pool is initialized before attempting to add liquidity
+        (uint160 sqrtPriceX96,,,) = IPoolManager(POOL_MANAGER).getSlot0(poolKey.toId());
+        require(sqrtPriceX96 != 0, "Pool is not initialized. Run InitializePoolSepolia first.");
+        console.log("Pool verified: sqrtPriceX96 =", sqrtPriceX96);
+
+        // Amount of liquidity to add (dynamic based on decimals)
+        uint256 amount0Max = 1_000 * 10**decimals0;
+        uint256 amount1Max = 1_000 * 10**decimals1;
 
         console.log("");
         console.log("=== Liquidity Parameters ===");
@@ -96,10 +113,15 @@ contract AddLiquiditySepolia is Script {
             uint8(Actions.CLOSE_CURRENCY)
         );
 
-        // Calculate liquidity - use a smaller amount for testing
-        // With 1:1 price and full range, liquidity ~ min(amount0, amount1 * 10^12) / 2
-        // Using 10^9 as a conservative liquidity target
-        uint128 liquidity = 10**9;
+        // Liquidity: configurable via env, default to small test value
+        uint128 liquidity;
+        try vm.envUint("LIQUIDITY") returns (uint256 envLiquidity) {
+            liquidity = uint128(envLiquidity);
+            console.log("Using liquidity from env:", liquidity);
+        } catch {
+            liquidity = 10**9; // Default for testing
+            console.log("Using default test liquidity:", liquidity);
+        }
 
         bytes[] memory params = new bytes[](3);
         // MINT_POSITION params: poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, owner, hookData

@@ -888,4 +888,133 @@ contract SecurityTest is Test {
         // warmupUntil should be reset to 0
         assertEq(hook.warmupUntil(key.toId()), 0, "warmupUntil should be cleared after expiry");
     }
+
+    // ============================================
+    // Phase 2: ウォームアップ + サーキットブレーカー交差テスト
+    // ============================================
+
+    /// @notice ウォームアップ中にサーキットブレーカーが発動し、CB が優先されることを検証
+    function test_security_warmupAndCircuitBreakerInteraction() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build normal observations across multiple blocks
+        for (uint256 i = 1; i <= 5; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Trigger staleness -> warmup
+        skip(35 minutes);
+        vm.roll(10);
+        uint160 recoveryPrice = basePrice + uint160((basePrice * 5) / 100);
+        bytes32 recoverySlot = encodeSlot0(recoveryPrice, int24(50), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(recoverySlot);
+
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Verify warmup is active
+        assertTrue(hook.warmupUntil(key.toId()) > block.timestamp, "Warmup should be active");
+
+        // During warmup, beforeSwap returns BASE_FEE (warmup protects)
+        vm.prank(address(manager));
+        (bytes4 sel,, uint24 fee) = hook.beforeSwap(address(this), key, params, bytes(""));
+        assertEq(sel, BaseHook.beforeSwap.selector, "beforeSwap should succeed during warmup");
+        assertEq(fee & 0x0FFFFF, 300, "Should return BASE_FEE during warmup");
+
+        // Trigger circuit breaker via afterSwap with 15% price change
+        skip(10 minutes);
+        vm.roll(12);
+        uint160 cbPrice = recoveryPrice + uint160((recoveryPrice * 15) / 100);
+        bytes32 cbSlot = encodeSlot0(cbPrice, int24(100), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(cbSlot);
+
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Circuit breaker should be triggered
+        assertTrue(hook.isCircuitBreakerTriggered(key.toId()), "CB should be triggered during warmup");
+
+        // Now CB takes priority over warmup - next beforeSwap should revert
+        vm.expectRevert(VolatilityDynamicFeeHook.CircuitBreakerTriggered.selector);
+        vm.prank(address(manager));
+        hook.beforeSwap(address(this), key, params, bytes(""));
+    }
+
+    /// @notice ウォームアップ中でも afterSwap の MAX_PRICE_CHANGE_BPS (50%) チェックは有効
+    function test_security_warmupDoesNotBypassMaxPriceChange() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build normal observations across multiple blocks
+        for (uint256 i = 1; i <= 5; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Trigger staleness -> warmup
+        skip(35 minutes);
+        vm.roll(10);
+        uint160 recoveryPrice = basePrice + uint160((basePrice * 5) / 100);
+        bytes32 recoverySlot = encodeSlot0(recoveryPrice, int24(50), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(recoverySlot);
+
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Verify warmup is active
+        assertTrue(hook.warmupUntil(key.toId()) > block.timestamp, "Warmup should be active");
+
+        // Attempt extreme price change (70%) during warmup via afterSwap
+        // afterSwap security checks are independent of warmup
+        skip(10 minutes);
+        vm.roll(12);
+        uint160 extremePrice = recoveryPrice + uint160((recoveryPrice * 70) / 100);
+        bytes32 extremeSlot = encodeSlot0(extremePrice, int24(200), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(extremeSlot);
+
+        // Should revert with PriceManipulationDetected (50% threshold)
+        vm.expectRevert(VolatilityDynamicFeeHook.PriceManipulationDetected.selector);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+    }
 }
