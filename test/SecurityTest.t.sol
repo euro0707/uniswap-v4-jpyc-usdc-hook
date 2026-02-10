@@ -67,6 +67,10 @@ contract SecurityTest is Test {
         uint256 until
     );
 
+    event WarmupPeriodEnded(
+        PoolId indexed poolId
+    );
+
     event DynamicFeeCalculated(
         PoolId indexed poolId,
         uint256 volatility,
@@ -763,5 +767,125 @@ contract SecurityTest is Test {
         vm.prank(address(manager));
         (bytes4 selector,,) = hook.beforeSwap(address(this), key, params, bytes(""));
         assertEq(selector, BaseHook.beforeSwap.selector, "beforeSwap should succeed after warmup expiry");
+    }
+
+    /// @notice 初回 staleness スワップで beforeSwap が BASE_FEE を返すことを検証
+    /// @dev Codex arch review: warmup must protect the FIRST post-stale swap
+    function test_security_firstPostStaleSwapProtected() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build normal observations
+        for (uint256 i = 1; i <= 5; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Wait for staleness (> 30 min)
+        skip(35 minutes);
+        vm.roll(10);
+
+        // BEFORE any afterSwap, call beforeSwap - it should detect staleness and use BASE_FEE
+        vm.expectEmit(true, false, false, true, address(hook));
+        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes);
+
+        vm.expectEmit(true, false, false, true, address(hook));
+        emit DynamicFeeCalculated(key.toId(), 0, 300);
+
+        vm.prank(address(manager));
+        (bytes4 selector,, uint24 feeWithFlag) = hook.beforeSwap(address(this), key, params, bytes(""));
+
+        assertEq(selector, BaseHook.beforeSwap.selector, "First post-stale beforeSwap should succeed");
+        uint24 baseFee = feeWithFlag & 0x0FFFFF;
+        assertEq(baseFee, 300, "First post-stale swap should return BASE_FEE");
+        assertTrue(hook.warmupUntil(key.toId()) > block.timestamp, "warmupUntil should be set by beforeSwap");
+    }
+
+    /// @notice ウォームアップ終了時に WarmupPeriodEnded イベントが発行されることを検証
+    function test_security_warmupEndedEventEmitted() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build observations and trigger staleness
+        for (uint256 i = 1; i <= 5; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Trigger staleness and warmup via beforeSwap
+        skip(35 minutes);
+        vm.roll(10);
+        vm.prank(address(manager));
+        hook.beforeSwap(address(this), key, params, bytes(""));
+
+        // Add observations during warmup so data won't be stale after warmup expires
+        uint160 freshPrice = basePrice + uint160((basePrice * 5) / 100);
+        bytes32 freshSlot = encodeSlot0(freshPrice, int24(50), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(freshSlot);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        for (uint256 i = 1; i <= 3; i++) {
+            skip(10 minutes);
+            vm.roll(10 + i);
+            uint160 p = freshPrice + uint160((freshPrice * i) / 100);
+            bytes32 s = encodeSlot0(p, int24(int256(50 + i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(s);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Skip remaining warmup (warmup started ~35min mark, now at ~65min, need to reach ~65min from staleness trigger)
+        // warmupUntil = staleness_trigger_time + 30 min. We've used ~30min of observations. Skip 1 more minute.
+        skip(1 minutes);
+        vm.roll(15);
+
+        // Next beforeSwap should emit WarmupPeriodEnded
+        vm.expectEmit(true, false, false, false, address(hook));
+        emit WarmupPeriodEnded(key.toId());
+
+        vm.prank(address(manager));
+        hook.beforeSwap(address(this), key, params, bytes(""));
+
+        // warmupUntil should be reset to 0
+        assertEq(hook.warmupUntil(key.toId()), 0, "warmupUntil should be cleared after expiry");
     }
 }

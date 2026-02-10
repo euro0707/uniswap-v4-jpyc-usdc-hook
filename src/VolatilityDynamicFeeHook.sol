@@ -169,6 +169,21 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             }
         }
 
+        // ウォームアップ期限切れの検出とイベント発行
+        if (warmupUntil[poolId] != 0 && warmupUntil[poolId] <= block.timestamp) {
+            emit WarmupPeriodEnded(poolId);
+            warmupUntil[poolId] = 0;
+        }
+
+        // Staleness 検出: 観測データが古い場合はウォームアップを先行開始し BASE_FEE を返す
+        // （_afterSwap でのリセットより前に、最初のスワップを保護する）
+        ObservationLibrary.RingBuffer storage obsBeforeSwap = observations[poolId];
+        if (obsBeforeSwap.count > 0 && warmupUntil[poolId] == 0
+            && ObservationLibrary.isStale(obsBeforeSwap, STALENESS_THRESHOLD)) {
+            warmupUntil[poolId] = block.timestamp + WARMUP_DURATION;
+            emit WarmupPeriodStarted(poolId, warmupUntil[poolId]);
+        }
+
         // ウォームアップ中は BASE_FEE のみを返す（staleness リセット後の保護）
         if (warmupUntil[poolId] > block.timestamp) {
             uint24 warmupFee = BASE_FEE | LPFeeLibrary.OVERRIDE_FEE_FLAG;
