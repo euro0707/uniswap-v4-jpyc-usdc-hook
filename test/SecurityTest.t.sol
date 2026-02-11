@@ -961,6 +961,250 @@ contract SecurityTest is Test {
         hook.beforeSwap(address(this), key, params, bytes(""));
     }
 
+    // ============================================
+    // Phase 3: 境界値・エッジケーステスト
+    // ============================================
+
+    /// @notice MAX_FEE (5000) にキャップされることを検証
+    function test_security_maxFeeCap() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build observations with large price swings (8-9% each, under CB threshold)
+        for (uint256 i = 1; i <= 10; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            // Alternate price up and down by ~9% to create high volatility
+            uint160 newPrice;
+            if (i % 2 == 0) {
+                newPrice = basePrice + uint160((basePrice * 9) / 100);
+            } else {
+                newPrice = basePrice - uint160((basePrice * 9) / 100);
+            }
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Fee should be capped at MAX_FEE
+        uint24 fee = hook.getCurrentFee(key);
+        assertLe(fee, 5000, "Fee should not exceed MAX_FEE (5000)");
+    }
+
+    /// @notice MIN_UPDATE_INTERVAL 境界テスト: 9:59 はスキップ、10:00 は記録
+    function test_security_minUpdateIntervalBoundary() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // At 9 minutes 59 seconds - should NOT record observation
+        skip(10 minutes - 1);
+        uint160 newPrice1 = basePrice + uint160(1000000);
+        bytes32 newSlot1 = encodeSlot0(newPrice1, int24(5), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(newSlot1);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        uint160[] memory prices1 = hook.getPriceHistory(key);
+        assertEq(prices1.length, 1, "Should still have only 1 observation at 9:59");
+
+        // At exactly 10 minutes (1 more second) - should record observation
+        skip(1);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        uint160[] memory prices2 = hook.getPriceHistory(key);
+        assertEq(prices2.length, 2, "Should have 2 observations at 10:00");
+    }
+
+    /// @notice CB cooldown 境界テスト: 59:59 は revert、1:00:00 は自動リセット
+    function test_security_circuitBreakerCooldownBoundary() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build observations
+        for (uint256 i = 1; i <= 10; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Trigger CB with 15% price change
+        skip(10 minutes);
+        vm.roll(12);
+        uint160 currentPrice = basePrice + uint160((basePrice * 10) / 100);
+        uint160 volatilePrice = currentPrice + uint160((currentPrice * 15) / 100);
+        bytes32 volatileSlot = encodeSlot0(volatilePrice, int24(100), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(volatileSlot);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        assertTrue(hook.isCircuitBreakerTriggered(key.toId()), "CB should be triggered");
+
+        // At 59 minutes 59 seconds - should still revert
+        skip(1 hours - 1);
+        vm.expectRevert(VolatilityDynamicFeeHook.CircuitBreakerTriggered.selector);
+        vm.prank(address(manager));
+        hook.beforeSwap(address(this), key, params, bytes(""));
+
+        // At exactly 1 hour - should auto-reset
+        skip(1);
+        vm.roll(20);
+        vm.prank(address(manager));
+        (bytes4 sel,,) = hook.beforeSwap(address(this), key, params, bytes(""));
+        assertEq(sel, BaseHook.beforeSwap.selector, "Should succeed at exactly CIRCUIT_BREAKER_COOLDOWN");
+    }
+
+    /// @notice 複数プールの状態分離テスト
+    function test_security_multiplePoolsIsolation() public {
+        // Pool A
+        PoolKey memory keyA = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        // Pool B (different currency pair)
+        PoolKey memory keyB = PoolKey(
+            Currency.wrap(address(0x3)),
+            Currency.wrap(address(0x4)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        // Initialize both pools
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), keyA, basePrice, int24(0));
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), keyB, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build observations for both pools
+        for (uint256 i = 1; i <= 10; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), keyA, params, BalanceDelta.wrap(0), bytes(""));
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), keyB, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Trigger CB on pool A only
+        skip(10 minutes);
+        vm.roll(12);
+        uint160 currentPrice = basePrice + uint160((basePrice * 10) / 100);
+        uint160 volatilePrice = currentPrice + uint160((currentPrice * 15) / 100);
+        bytes32 volatileSlot = encodeSlot0(volatilePrice, int24(100), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(volatileSlot);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), keyA, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Pool A: CB triggered
+        assertTrue(hook.isCircuitBreakerTriggered(keyA.toId()), "Pool A CB should be triggered");
+        // Pool B: CB NOT triggered (isolated)
+        assertFalse(hook.isCircuitBreakerTriggered(keyB.toId()), "Pool B CB should NOT be triggered");
+
+        // Pool B should still work
+        bytes32 normalSlot = encodeSlot0(currentPrice, int24(50), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(normalSlot);
+        vm.prank(address(manager));
+        (bytes4 sel,,) = hook.beforeSwap(address(this), keyB, params, bytes(""));
+        assertEq(sel, BaseHook.beforeSwap.selector, "Pool B swap should succeed");
+    }
+
+    /// @notice uint160 上限に近い sqrtPriceX96 でオーバーフローしないことを検証
+    function test_security_largeSqrtPriceNoOverflow() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        // Use a large sqrtPriceX96 near uint160 max / 2
+        // (uint160 max = ~1.46e48, use ~7.3e47)
+        uint160 basePrice = uint160(type(uint160).max / 2);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build observations with small price changes (1%) on large base price
+        for (uint256 i = 1; i <= 5; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160(uint256(basePrice) * i / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // getCurrentFee should not revert (FullMath handles large values)
+        uint24 fee = hook.getCurrentFee(key);
+        assertGe(fee, 300, "Fee should be at least BASE_FEE");
+        assertLe(fee, 5000, "Fee should not exceed MAX_FEE");
+    }
+
     /// @notice ウォームアップ中でも afterSwap の MAX_PRICE_CHANGE_BPS (50%) チェックは有効
     function test_security_warmupDoesNotBypassMaxPriceChange() public {
         PoolKey memory key = PoolKey(

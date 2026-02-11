@@ -39,7 +39,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
     // 設定パラメータ（USDC/JPYC = USD/JPY為替ペア向け最適化）
     // USDC/JPYCは実質的にドル円レートを反映するため、通常の為替ボラティリティ（0.5-1.5%/日）を想定
-    uint256 public constant HISTORY_SIZE = 10;      // 保存する価格履歴の数
+    uint256 public constant HISTORY_SIZE = 100;     // リングバッファの最大容量（ObservationLibrary.RingBuffer.data[100] と一致）
     uint24 public constant BASE_FEE = 300;          // 基本手数料 0.03% (300 = 0.03%) - 為替ペア標準
     uint24 public constant MAX_FEE = 5000;          // 最大手数料 0.5% (5000 = 0.5%) - 急変時保護
     uint256 public constant VOLATILITY_THRESHOLD = 500; // ボラティリティの閾値
@@ -248,7 +248,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         if (obs.count >= MIN_BLOCK_SPAN) {
             bool isMultiBlock = ObservationLibrary.validateMultiBlock(obs, MIN_BLOCK_SPAN);
             if (!isMultiBlock) {
-                emit PriceManipulationAttempt(poolId, 0, 0);
+                emit PriceManipulationAttempt(poolId, 0, obs.count);
                 // フラッシュローン攻撃の可能性、観測をスキップ
                 return (BaseHook.afterSwap.selector, 0);
             }
@@ -366,13 +366,19 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             uint256 weight = recencyWeight * timeWeight;
 
             // sqrtPriceX96を使って変動を計算（絶対値）
+            // price = sqrtPrice^2 なので、変動率 = |currSqrt^2 - prevSqrt^2| / prevSqrt^2
+            // FullMath を使用してオーバーフロー安全に計算（_afterSwap と同じ精度）
             uint256 curSqrt = uint256(current.sqrtPriceX96);
             uint256 prevSqrt = uint256(previous.sqrtPriceX96);
             uint256 variation;
             if (curSqrt > prevSqrt) {
-                variation = ((curSqrt - prevSqrt) * 10000) / prevSqrt;
+                uint256 diff = curSqrt - prevSqrt;
+                uint256 temp = FullMath.mulDiv(curSqrt + prevSqrt, diff, prevSqrt);
+                variation = FullMath.mulDiv(temp, 10000, prevSqrt);
             } else {
-                variation = ((prevSqrt - curSqrt) * 10000) / prevSqrt;
+                uint256 diff = prevSqrt - curSqrt;
+                uint256 temp = FullMath.mulDiv(curSqrt + prevSqrt, diff, prevSqrt);
+                variation = FullMath.mulDiv(temp, 10000, prevSqrt);
             }
 
             // 時間重み付き変動を加算（オーバーフローチェック付き）
