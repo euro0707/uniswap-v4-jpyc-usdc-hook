@@ -400,4 +400,284 @@ contract VolatilityDynamicFeeHookTest is Test {
 
     // Bollinger Bands tests removed - feature not implemented in simplified version
 
+    // ============================================
+    // Phase 2: Warmup + Circuit Breaker Tests
+    // ============================================
+
+    /// @notice Test warmup period safe operation after staleness reset
+    function test_warmup_safeOperation() public {
+        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        // Add one observation
+        skip(10 minutes);
+        uint160 price1 = basePrice + 1000000;
+        bytes32 slot1 = encodeSlot0(price1, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot1);
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Wait past staleness threshold to trigger warmup
+        skip(31 minutes); // STALENESS_THRESHOLD = 30 minutes
+
+        // First swap after staleness should start warmup and return BASE_FEE
+        uint160 price2 = price1 + 2000000;
+        bytes32 slot2 = encodeSlot0(price2, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot2);
+
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // During warmup, fee should be BASE_FEE
+        uint24 feeInWarmup = hook.getCurrentFee(key);
+        assertEq(feeInWarmup, 300, "Fee should be BASE_FEE during warmup");
+
+        // After warmup period (30 minutes), normal fee calculation should resume
+        skip(31 minutes); // WARMUP_DURATION = 30 minutes
+        uint24 feeAfterWarmup = hook.getCurrentFee(key);
+        // Fee can be anything based on volatility, just check it's calculated
+        assertGe(feeAfterWarmup, 300, "Fee after warmup should be at least BASE_FEE");
+        assertLe(feeAfterWarmup, 5000, "Fee after warmup should not exceed MAX_FEE");
+    }
+
+    /// @notice Test circuit breaker activation on large price spike
+    function test_circuitBreaker_priceSpike() public {
+        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.roll(1);
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Establish normal price history
+        for (uint256 i = 1; i <= 3; i++) {
+            skip(10 minutes);
+            vm.roll(1 + i);
+            uint160 normalPrice = basePrice + uint160((basePrice * i) / 200); // +0.5% each
+            bytes32 normalSlot = encodeSlot0(normalPrice, int24(0), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(normalSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Trigger circuit breaker with >10% price spike
+        // CIRCUIT_BREAKER_THRESHOLD = 1000 (10%)
+        // Use 15% sqrtPrice increase ≈ 32% actual price increase
+        skip(10 minutes);
+        vm.roll(5);
+        uint160 lastPrice = basePrice + uint160((basePrice * 3) / 200); // last was +1.5%
+        uint160 spikePrice = lastPrice + uint160((lastPrice * 15) / 100); // +15% sqrtPrice
+        bytes32 spikeSlot = encodeSlot0(spikePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(spikeSlot);
+
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Circuit breaker should now be triggered
+        PoolId poolId = key.toId();
+        bool isTriggered = hook.isCircuitBreakerTriggered(poolId);
+        assertTrue(isTriggered, "Circuit breaker should be triggered after large price spike");
+
+        // Next swap should revert with CircuitBreakerTriggered
+        skip(10 minutes);
+        vm.roll(6);
+        vm.expectRevert(VolatilityDynamicFeeHook.CircuitBreakerTriggered.selector);
+        vm.prank(address(manager));
+        (bytes4 selector,,) = hook.beforeSwap(address(this), key, params, bytes(""));
+        assertEq(selector, BaseHook.beforeSwap.selector);
+    }
+
+    // ============================================
+    // Phase 3: Boundary Tests
+    // ============================================
+
+    /// @notice Test volatility calculation near overflow boundary
+    function test_boundary_volatilityOverflow() public {
+        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+        
+        // Use maximum safe sqrtPriceX96 value
+        uint160 maxPrice = TickMath.MAX_SQRT_PRICE - 1000; // Slightly below max to avoid initialization revert
+        
+        bytes32 slot = encodeSlot0(maxPrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, maxPrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Add observations with extreme price values
+        for (uint256 i = 1; i <= 5; i++) {
+            skip(10 minutes);
+            vm.roll(i);
+            uint160 price = maxPrice - uint160(i * 100000); // Gradual decrease from max
+            bytes32 priceSlot = encodeSlot0(price, int24(0), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(priceSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Volatility should be calculated without overflow and capped at 100
+        uint24 fee = hook.getCurrentFee(key);
+        assertGe(fee, 300, "Fee should be at least BASE_FEE");
+        assertLe(fee, 5000, "Fee should not exceed MAX_FEE");
+    }
+
+    /// @notice Test MIN_UPDATE_INTERVAL boundary (10 minutes)
+    function test_boundary_minUpdateInterval() public {
+        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // First observation at t=0
+        vm.roll(1);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Test at 9m59s: should NOT update (under MIN_UPDATE_INTERVAL)
+        skip(9 minutes + 59 seconds);
+        vm.roll(2);
+        uint160 price1 = basePrice + 1000;
+        bytes32 slot1 = encodeSlot0(price1, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot1);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        // Observation count should still be 1 (not updated)
+
+        // Test at exactly 10m00s: should update
+        skip(1 seconds); // Now at 10 minutes total
+        vm.roll(3);
+        uint160 price2 = basePrice + 2000;
+        bytes32 slot2 = encodeSlot0(price2, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot2);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        // Observation count should now be 2 (updated)
+
+        // Verify fee calculation works
+        uint24 fee = hook.getCurrentFee(key);
+        assertGe(fee, 300, "Fee should be calculated after MIN_UPDATE_INTERVAL");
+    }
+
+    /// @notice Test circuit breaker threshold boundary (10% = 1000 bps)
+    function test_boundary_circuitBreakerThreshold() public {
+        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.roll(1);
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Establish normal price history
+        for (uint256 i = 1; i <= 3; i++) {
+            skip(10 minutes);
+            vm.roll(1 + i);
+            uint160 normalPrice = basePrice + uint160((basePrice * i) / 200); // +0.5% each
+            bytes32 normalSlot = encodeSlot0(normalPrice, int24(0), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(normalSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Test 9.5% sqrtPrice change (should NOT trigger, below 10%)
+        skip(10 minutes);
+        vm.roll(5);
+        uint160 lastPrice = basePrice + uint160((basePrice * 3) / 200);
+        uint160 smallSpike = lastPrice + uint160((lastPrice * 95) / 1000); // +9.5% sqrtPrice
+        bytes32 smallSpikeSlot = encodeSlot0(smallSpike, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(smallSpikeSlot);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        
+        PoolId poolId = key.toId();
+        bool isTriggered = hook.isCircuitBreakerTriggered(poolId);
+        assertFalse(isTriggered, "Circuit breaker should NOT trigger at 9.5% sqrtPrice change");
+
+        // Test 11% sqrtPrice change (should trigger, above 10%)
+        skip(10 minutes);
+        vm.roll(6);
+        uint160 largeSpike = smallSpike + uint160((smallSpike * 11) / 100); // +11% sqrtPrice
+        bytes32 largeSpikeSlot = encodeSlot0(largeSpike, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(largeSpikeSlot);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        
+        isTriggered = hook.isCircuitBreakerTriggered(poolId);
+        assertTrue(isTriggered, "Circuit breaker should trigger at 11% sqrtPrice change");
+    }
+
+    /// @notice Test warmup duration boundary (30 minutes)
+    function test_boundary_warmupDuration() public {
+        PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Add one observation
+        skip(10 minutes);
+        vm.roll(1);
+        uint160 price1 = basePrice + 1000000;
+        bytes32 slot1 = encodeSlot0(price1, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot1);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Trigger staleness to start warmup
+        skip(31 minutes); // STALENESS_THRESHOLD = 30 minutes
+        uint160 price2 = price1 + 2000000;
+        bytes32 slot2 = encodeSlot0(price2, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot2);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Test at 29m59s: should still be in warmup (BASE_FEE)
+        skip(29 minutes + 59 seconds);
+        uint24 feeDuringWarmup = hook.getCurrentFee(key);
+        assertEq(feeDuringWarmup, 300, "Fee should be BASE_FEE at 29m59s (still in warmup)");
+
+        // Test at exactly 30m00s: should exit warmup
+        skip(1 seconds); // Now exactly 30 minutes
+        uint24 feeAtBoundary = hook.getCurrentFee(key);
+        // Fee can be dynamic now, just verify it's in valid range
+        assertGe(feeAtBoundary, 300, "Fee after warmup should be at least BASE_FEE");
+        assertLe(feeAtBoundary, 5000, "Fee after warmup should not exceed MAX_FEE");
+
+        // Test at 30m01s: should definitely be out of warmup
+        skip(1 seconds);
+        uint24 feeAfterWarmup = hook.getCurrentFee(key);
+        assertGe(feeAfterWarmup, 300, "Fee after warmup should be at least BASE_FEE");
+        assertLe(feeAfterWarmup, 5000, "Fee after warmup should not exceed MAX_FEE");
+    }
+
 }

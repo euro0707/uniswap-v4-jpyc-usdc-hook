@@ -71,7 +71,9 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     event CircuitBreakerActivated(
         PoolId indexed poolId,
         uint256 priceChange,
-        uint160 currentPrice
+        uint160 currentPrice,
+        uint160 previousPrice,
+        uint256 threshold
     );
 
     event CircuitBreakerReset(
@@ -91,12 +93,15 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     event DynamicFeeCalculated(
         PoolId indexed poolId,
         uint256 volatility,
-        uint24 fee
+        uint24 fee,
+        uint256 observationCount,
+        uint160 currentPrice
     );
 
     event WarmupPeriodStarted(
         PoolId indexed poolId,
-        uint256 until
+        uint256 until,
+        string reason
     );
 
     event WarmupPeriodEnded(
@@ -181,13 +186,14 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         if (obsBeforeSwap.count > 0 && warmupUntil[poolId] == 0
             && ObservationLibrary.isStale(obsBeforeSwap, STALENESS_THRESHOLD)) {
             warmupUntil[poolId] = block.timestamp + WARMUP_DURATION;
-            emit WarmupPeriodStarted(poolId, warmupUntil[poolId]);
+            emit WarmupPeriodStarted(poolId, warmupUntil[poolId], "staleness");
         }
 
         // ウォームアップ中は BASE_FEE のみを返す（staleness リセット後の保護）
         if (warmupUntil[poolId] > block.timestamp) {
             uint24 warmupFee = BASE_FEE | LPFeeLibrary.OVERRIDE_FEE_FLAG;
-            emit DynamicFeeCalculated(poolId, 0, BASE_FEE);
+            (uint160 sqrtPriceX96Warmup,,,) = poolManager.getSlot0(poolId);
+            emit DynamicFeeCalculated(poolId, 0, BASE_FEE, obsBeforeSwap.count, sqrtPriceX96Warmup);
             return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, warmupFee);
         }
 
@@ -198,7 +204,9 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         uint24 fee = _getFeeBasedOnVolatility(volatility);
 
         // イベント発行（監視とデバッグ用）
-        emit DynamicFeeCalculated(poolId, volatility, fee);
+        ObservationLibrary.RingBuffer storage obsForEvent = observations[poolId];
+        (uint160 sqrtPriceX96ForEvent,,,) = poolManager.getSlot0(poolId);
+        emit DynamicFeeCalculated(poolId, volatility, fee, obsForEvent.count, sqrtPriceX96ForEvent);
 
         // 手数料を更新（OVERRIDE_FEE_FLAGを設定）
         uint24 feeWithFlag = fee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
@@ -240,7 +248,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
             // ウォームアップ期間を開始（リセット後の手数料操作を防止）
             warmupUntil[poolId] = block.timestamp + WARMUP_DURATION;
-            emit WarmupPeriodStarted(poolId, warmupUntil[poolId]);
+            emit WarmupPeriodStarted(poolId, warmupUntil[poolId], "ring_reset");
             return (BaseHook.afterSwap.selector, 0);
         }
 
@@ -295,7 +303,10 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
                 if (priceChange > CIRCUIT_BREAKER_THRESHOLD && !circuitBreakerTriggered[poolId]) {
                     circuitBreakerTriggered[poolId] = true;
                     circuitBreakerActivatedAt[poolId] = block.timestamp;
-                    emit CircuitBreakerActivated(poolId, priceChange, sqrtPriceX96);
+                    // Get previous price from last observation
+                    uint256 prevIdx = obs.index == 0 ? 99 : obs.index - 1;
+                    uint160 previousPrice = obs.data[prevIdx].sqrtPriceX96;
+                    emit CircuitBreakerActivated(poolId, priceChange, sqrtPriceX96, previousPrice, CIRCUIT_BREAKER_THRESHOLD);
                     // 異常価格（10-50%変動）は観測履歴に記録しない（ボラティリティ計算の汚染を防ぐ）
                     return (BaseHook.afterSwap.selector, 0);
                 }

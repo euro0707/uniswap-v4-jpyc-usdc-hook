@@ -14,6 +14,8 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {LiquidityAmounts} from "v4-periphery/src/libraries/LiquidityAmounts.sol";
 
 interface IPermit2 {
     function approve(address token, address spender, uint160 amount, uint48 expiration) external;
@@ -49,13 +51,12 @@ contract AddLiquiditySepolia is Script {
         address currency0 = token0Addr < token1Addr ? token0Addr : token1Addr;
         address currency1 = token0Addr < token1Addr ? token1Addr : token0Addr;
 
-        // Determine decimals from env (Sepolia mock tokens have variable addresses)
-        uint8 decimals0 = uint8(vm.envOr("TOKEN0_DECIMALS", uint256(18)));
-        uint8 decimals1 = uint8(vm.envOr("TOKEN1_DECIMALS", uint256(6)));
-        // Swap decimals if token order was swapped
-        if (token0Addr > token1Addr) {
-            (decimals0, decimals1) = (decimals1, decimals0);
-        }
+        // Get decimals directly from token contracts (ADVISORY #1 fix)
+        uint8 decimals0Raw = IERC20Metadata(token0Addr).decimals();
+        uint8 decimals1Raw = IERC20Metadata(token1Addr).decimals();
+        // Sort decimals to match sorted currencies
+        uint8 decimals0 = token0Addr < token1Addr ? decimals0Raw : decimals1Raw;
+        uint8 decimals1 = token0Addr < token1Addr ? decimals1Raw : decimals0Raw;
 
         console.log("Sorted currency0:", currency0);
         console.log("Sorted currency1:", currency1);
@@ -88,9 +89,13 @@ contract AddLiquiditySepolia is Script {
         int24 tickLower = (TickMath.MIN_TICK / 60) * 60;
         int24 tickUpper = (TickMath.MAX_TICK / 60) * 60;
 
-        // Verify pool is initialized before attempting to add liquidity
+        // Verify pool is initialized before attempting to add liquidity (ADVISORY #3 fix)
         (uint160 sqrtPriceX96,,,) = IPoolManager(POOL_MANAGER).getSlot0(poolKey.toId());
         require(sqrtPriceX96 != 0, "Pool is not initialized. Run InitializePoolSepolia first.");
+        require(
+            sqrtPriceX96 >= TickMath.MIN_SQRT_PRICE && sqrtPriceX96 <= TickMath.MAX_SQRT_PRICE,
+            "Invalid pool price: sqrtPriceX96 out of TickMath range"
+        );
         console.log("Pool verified: sqrtPriceX96 =", sqrtPriceX96);
 
         // Amount of liquidity to add (dynamic based on decimals)
@@ -113,15 +118,18 @@ contract AddLiquiditySepolia is Script {
             uint8(Actions.CLOSE_CURRENCY)
         );
 
-        // Liquidity: configurable via env, default to small test value
-        uint128 liquidity;
-        try vm.envUint("LIQUIDITY") returns (uint256 envLiquidity) {
-            liquidity = uint128(envLiquidity);
-            console.log("Using liquidity from env:", liquidity);
-        } catch {
-            liquidity = 10**9; // Default for testing
-            console.log("Using default test liquidity:", liquidity);
-        }
+        // Calculate liquidity dynamically based on amounts and price (ADVISORY #2 fix)
+        uint160 sqrtPriceLower = TickMath.getSqrtPriceAtTick(tickLower);
+        uint160 sqrtPriceUpper = TickMath.getSqrtPriceAtTick(tickUpper);
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            sqrtPriceLower,
+            sqrtPriceUpper,
+            amount0Max,
+            amount1Max
+        );
+        console.log("Calculated liquidity from amounts:", liquidity);
+        require(liquidity > 0, "Calculated liquidity is zero - check token balances");
 
         bytes[] memory params = new bytes[](3);
         // MINT_POSITION params: poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, owner, hookData

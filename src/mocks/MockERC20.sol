@@ -5,7 +5,10 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title MockERC20
-/// @notice Mock ERC20 token for testing (owner-restricted mint)
+/// @notice Mock ERC20 token for LOCAL TESTING ONLY (owner-restricted mint)
+/// @dev WARNING: Do NOT use on public testnets without proper access control.
+///      The mint function is restricted to owner, but deploy with extreme caution.
+///      For production, use real token contracts with proper governance.
 contract MockERC20 is ERC20, Ownable {
     uint8 private immutable _decimals;
 
