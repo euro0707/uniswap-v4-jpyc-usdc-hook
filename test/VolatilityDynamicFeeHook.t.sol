@@ -30,6 +30,10 @@ contract TestHook is VolatilityDynamicFeeHook {
 
     // override the internal validation to disable permission check during tests
     function validateHookAddress(BaseHook) internal pure override {}
+
+    function exposedGetFeeBasedOnVolatility(uint256 volatility) external pure returns (uint24) {
+        return _getFeeBasedOnVolatility(volatility);
+    }
 }
 
 contract VolatilityDynamicFeeHookTest is Test {
@@ -101,6 +105,15 @@ contract VolatilityDynamicFeeHookTest is Test {
         // with only 1 price, volatility should be 0, so fee = BASE_FEE = 300
         uint24 currentFee = hook.getCurrentFee(key);
         assertEq(currentFee, 300, "Fee should be BASE_FEE when volatility is 0");
+    }
+
+    function test_feeCurve_rounding_regression_legacyBehavior() public {
+        TestHook t = TestHook(address(hook));
+
+        assertEq(t.exposedGetFeeBasedOnVolatility(14), 347, "v=14 should match legacy rounding");
+        assertEq(t.exposedGetFeeBasedOnVolatility(64), 2180, "v=64 should match legacy rounding");
+        assertEq(t.exposedGetFeeBasedOnVolatility(100), 5000, "v=100 should hit MAX_FEE");
+        assertEq(t.exposedGetFeeBasedOnVolatility(130), 5000, "v>100 should be clamped");
     }
 
     function test_afterSwap_updatesPriceHistory() public {

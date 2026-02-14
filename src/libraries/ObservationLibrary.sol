@@ -117,8 +117,8 @@ library ObservationLibrary {
 
         // Track unique blocks using a simple linear scan with comparison
         // Note: We can't use mapping in memory, so we track last seen blocks
-        // Array size = minBlocks * 4 to provide sufficient buffer (max 20 for minBlocks=3)
-        uint256[20] memory seenBlocks; // Expanded to support up to 20 unique blocks
+        uint256 maxSeen = checkCount < 20 ? checkCount : 20;
+        uint256[] memory seenBlocks = new uint256[](maxSeen);
         uint256 seenCount = 0;
 
         for (uint256 i = 0; i < checkCount; i++) {
@@ -141,7 +141,7 @@ library ObservationLibrary {
                     }
                 }
 
-                if (isNewBlock && seenCount < 20) {
+                if (isNewBlock && seenCount < maxSeen) {
                     seenBlocks[seenCount] = blockNum;
                     seenCount++;
                     uniqueBlocks++;

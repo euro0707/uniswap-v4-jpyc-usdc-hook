@@ -22,7 +22,6 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     using PoolIdLibrary for PoolKey;
     using LPFeeLibrary for uint24;
-    using StateLibrary for IPoolManager;
 
     // エラー定義
     error MustUseDynamicFee();
@@ -192,7 +191,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         // ウォームアップ中は BASE_FEE のみを返す（staleness リセット後の保護）
         if (warmupUntil[poolId] > block.timestamp) {
             uint24 warmupFee = BASE_FEE | LPFeeLibrary.OVERRIDE_FEE_FLAG;
-            (uint160 sqrtPriceX96Warmup,,,) = poolManager.getSlot0(poolId);
+            uint160 sqrtPriceX96Warmup = _getCurrentSqrtPriceX96(poolId);
             emit DynamicFeeCalculated(poolId, 0, BASE_FEE, obsBeforeSwap.count, sqrtPriceX96Warmup);
             return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, warmupFee);
         }
@@ -205,7 +204,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         // イベント発行（監視とデバッグ用）
         ObservationLibrary.RingBuffer storage obsForEvent = observations[poolId];
-        (uint160 sqrtPriceX96ForEvent,,,) = poolManager.getSlot0(poolId);
+        uint160 sqrtPriceX96ForEvent = _getCurrentSqrtPriceX96(poolId);
         emit DynamicFeeCalculated(poolId, volatility, fee, obsForEvent.count, sqrtPriceX96ForEvent);
 
         // 手数料を更新（OVERRIDE_FEE_FLAGを設定）
@@ -235,7 +234,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         }
 
         // 現在価格を取得
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        uint160 sqrtPriceX96 = _getCurrentSqrtPriceX96(poolId);
 
         // Staleness チェック: 長期無取引後のリカバリ
         // 全観測が STALENESS_THRESHOLD (30分) より古い場合、リングをリセット
@@ -436,15 +435,27 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             return BASE_FEE;
         }
 
-        // 二次関数カーブ: fee = BASE_FEE + (MAX_FEE - BASE_FEE) * (volatility/100)^2
-        // volatility = 0  -> 0.03% (BASE_FEE) - 通常の為替変動
-        // volatility = 50 -> 0.148% - 中程度のボラティリティ
-        // volatility = 100 -> 0.5% (MAX_FEE) - 急激な変動時（2%以上）
-        uint256 normalizedSquared = (volatility * volatility) / 100; // volatility^2 / 100
+        // Safety-first: keep legacy rounding behavior to avoid unintended fee uplift
+        // at specific volatility points. Any curve/rounding change must be treated
+        // as a protocol-parameter change and accompanied by explicit test updates.
+        // Internal callers currently provide 0..100, but clamp defensively.
+        uint256 cappedVolatility = volatility > 100 ? 100 : volatility;
+
+        // Quadratic curve:
+        // fee = BASE_FEE + (MAX_FEE - BASE_FEE) * (volatility / 100)^2
+        // Keep legacy two-step division to preserve previous effective outputs.
+        uint256 normalizedSquared = (cappedVolatility * cappedVolatility) / 100;
         uint256 feeRange = uint256(MAX_FEE) - uint256(BASE_FEE);
         uint256 fee = uint256(BASE_FEE) + (feeRange * normalizedSquared) / 100;
 
         return fee > MAX_FEE ? MAX_FEE : uint24(fee);
+    }
+
+    function _getCurrentSqrtPriceX96(PoolId poolId) internal view returns (uint160 sqrtPriceX96) {
+        // pools[poolId] slot key in PoolManager storage.
+        bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(poolId), StateLibrary.POOLS_SLOT));
+        bytes32 data = poolManager.extsload(stateSlot);
+        sqrtPriceX96 = uint160(uint256(data));
     }
 
     /// @notice 現在の手数料を取得（外部から確認用）
