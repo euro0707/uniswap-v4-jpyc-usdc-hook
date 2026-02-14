@@ -57,6 +57,9 @@ yarn-error.log*
 
 # Claude Code
 .claude/
+.agent/
+.windsurf/
+slither-report.latest.json
 
 # Misc
 nul
