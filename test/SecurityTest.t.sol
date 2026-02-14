@@ -64,7 +64,8 @@ contract SecurityTest is Test {
 
     event WarmupPeriodStarted(
         PoolId indexed poolId,
-        uint256 until
+        uint256 until,
+        string reason
     );
 
     event WarmupPeriodEnded(
@@ -74,7 +75,9 @@ contract SecurityTest is Test {
     event DynamicFeeCalculated(
         PoolId indexed poolId,
         uint256 volatility,
-        uint24 fee
+        uint24 fee,
+        uint256 observationCount,
+        uint160 currentPrice
     );
 
     function setUp() public {
@@ -277,7 +280,7 @@ contract SecurityTest is Test {
 
         // CircuitBreakerActivatedイベントを期待
         vm.expectEmit(true, false, false, false);
-        emit VolatilityDynamicFeeHook.CircuitBreakerActivated(key.toId(), 0, volatilePrice);
+        emit VolatilityDynamicFeeHook.CircuitBreakerActivated(key.toId(), 0, volatilePrice, 0, 0);
 
         vm.prank(address(manager));
         hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
@@ -648,7 +651,7 @@ contract SecurityTest is Test {
 
         // Expect WarmupPeriodStarted event
         vm.expectEmit(true, false, false, true, address(hook));
-        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes);
+        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes, "ring_reset");
 
         vm.prank(address(manager));
         hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
@@ -701,7 +704,7 @@ contract SecurityTest is Test {
         // Now during warmup, beforeSwap should return BASE_FEE (300)
         // DynamicFeeCalculated event with volatility=0 and fee=BASE_FEE
         vm.expectEmit(true, false, false, true, address(hook));
-        emit DynamicFeeCalculated(key.toId(), 0, 300);
+        emit DynamicFeeCalculated(key.toId(), 0, 300, 1, recoveryPrice);
 
         vm.prank(address(manager));
         (bytes4 selector,, uint24 feeWithFlag) = hook.beforeSwap(address(this), key, params, bytes(""));
@@ -806,10 +809,10 @@ contract SecurityTest is Test {
 
         // BEFORE any afterSwap, call beforeSwap - it should detect staleness and use BASE_FEE
         vm.expectEmit(true, false, false, true, address(hook));
-        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes);
+        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes, "staleness");
 
         vm.expectEmit(true, false, false, true, address(hook));
-        emit DynamicFeeCalculated(key.toId(), 0, 300);
+        emit DynamicFeeCalculated(key.toId(), 0, 300, 6, basePrice + uint160((basePrice * 5 * 2) / 100));
 
         vm.prank(address(manager));
         (bytes4 selector,, uint24 feeWithFlag) = hook.beforeSwap(address(this), key, params, bytes(""));

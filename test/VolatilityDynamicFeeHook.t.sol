@@ -497,8 +497,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         vm.roll(6);
         vm.expectRevert(VolatilityDynamicFeeHook.CircuitBreakerTriggered.selector);
         vm.prank(address(manager));
-        (bytes4 selector,,) = hook.beforeSwap(address(this), key, params, bytes(""));
-        assertEq(selector, BaseHook.beforeSwap.selector);
+        hook.beforeSwap(address(this), key, params, bytes(""));
     }
 
     // ============================================
@@ -605,11 +604,11 @@ contract VolatilityDynamicFeeHookTest is Test {
             hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
         }
 
-        // Test 9.5% sqrtPrice change (should NOT trigger, below 10%)
+        // Test 4% sqrtPrice change (~8.16% actual price change, below 10% threshold)
         skip(10 minutes);
         vm.roll(5);
         uint160 lastPrice = basePrice + uint160((basePrice * 3) / 200);
-        uint160 smallSpike = lastPrice + uint160((lastPrice * 95) / 1000); // +9.5% sqrtPrice
+        uint160 smallSpike = lastPrice + uint160((lastPrice * 4) / 100); // +4% sqrtPrice
         bytes32 smallSpikeSlot = encodeSlot0(smallSpike, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(smallSpikeSlot);
         vm.prank(address(manager));
@@ -617,7 +616,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         
         PoolId poolId = key.toId();
         bool isTriggered = hook.isCircuitBreakerTriggered(poolId);
-        assertFalse(isTriggered, "Circuit breaker should NOT trigger at 9.5% sqrtPrice change");
+        assertFalse(isTriggered, "Circuit breaker should NOT trigger at 4% sqrtPrice change");
 
         // Test 11% sqrtPrice change (should trigger, above 10%)
         skip(10 minutes);
