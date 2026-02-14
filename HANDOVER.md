@@ -4,27 +4,34 @@
 - Date: 2026-02-14
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `5ca3fb1`
-- Working tree status at handover: clean
+- Remote state: `origin/master` is at `b34e1b3`
+- Working tree status at handover: clean before this handover-doc update
 
 ## What Was Completed
 - Added function-scoped Slither triage for intentional legacy rounding in `_getFeeBasedOnVolatility` (`divide-before-multiply`).
 - Added rationale/impact in `DECISIONS.md` for the accepted arithmetic order.
 - Reduced Slither `shadowing-local` noise in `src/` by renaming `MockERC20` constructor args (`name`/`symbol` -> `name_`/`symbol_`).
 - Added formal triage decision for remaining `src/` Low/Informational findings in `DECISIONS.md`.
+- Added explicit Slither suppressions for time-dependent checks in `src/` (`timestamp`) without behavior changes.
+- Updated `DECISIONS.md` with timestamp-noise reduction decision and validation.
 - Added CI workflow `.github/workflows/ci.yml` for Foundry checks on push/PR (`master`).
 - Enforced gas baseline consistency in CI with `forge snapshot --check .gas-snapshot`.
 - Added CI gas-baseline enforcement rationale in `DECISIONS.md`.
-- Verified GitHub Actions run for `b91cbbb` succeeded (`CI` run #1, `test-and-gas-baseline` job).
+- Verified GitHub Actions runs for CI enforcement commits:
+  - `b91cbbb` (`run #1`) success
+  - `b34e1b3` (`run #4`) success
 - Refreshed static analysis report to `slither-report.latest.json`.
 - Added formal gas baseline artifact via `forge snapshot` (`.gas-snapshot`).
 - Committed and pushed to GitHub:
+  - `b34e1b3` `chore: suppress timestamp slither noise in src`
+  - `6e973b6` `docs: record ci verification status in handover`
   - `5ca3fb1` `docs: refresh handover after ci gas enforcement`
   - `b91cbbb` `ci: enforce gas snapshot baseline in workflow`
   - `51ed358` `docs: refresh handover notes after src triage`
-  - `71ed203` `chore: triage remaining slither findings in src`
 
 ## Recent Commits
+- `b34e1b3` chore: suppress timestamp slither noise in src
+- `6e973b6` docs: record ci verification status in handover
 - `5ca3fb1` docs: refresh handover after ci gas enforcement
 - `b91cbbb` ci: enforce gas snapshot baseline in workflow
 - `51ed358` docs: refresh handover notes after src triage
@@ -60,19 +67,23 @@
   - `forge test`
   - `forge snapshot --check .gas-snapshot`
 - Latest verified run:
-  - Commit: `b91cbbb0f3ca559685e243c0cc77c7454765636`
+  - Commit: `b34e1b3fedef3fde013821be3e07ce2ed062054f`
   - Workflow result: `success`
-  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22024779562`
+  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22025074230`
 
 ### Slither rerun
 - Command run: `slither . --json slither-report.latest.json`
 - Report refreshed to: `slither-report.latest.json`
 - Current `src/` findings summary:
   - `Medium: 0`
-  - `Low: 5`
-  - `Informational: 4`
+  - `Low: 0`
+  - `Informational: 3`
 - Note:
   - Remaining `divide-before-multiply` detections are in dependency libraries under `lib/v4-core/src/`, not in project `src/`.
+  - Remaining `src/` informational checks are:
+    - `cyclomatic-complexity` (`_calculateVolatility`)
+    - `unimplemented-functions` (known Slither false positive on `BaseHook`)
+    - `pragma` (dependency version mix)
 
 ## Context7 Notes (Uniswap v4 docs checked)
 - `beforeSwap` `lpFeeOverride` is applied only when:
@@ -83,8 +94,8 @@
   - `IPoolManager.updateDynamicLPFee(PoolKey, uint24)`
 
 ## Recommended Next Actions
-1. If policy prefers fewer accepted warnings, evaluate refactors for time-dependent checks (`timestamp`) and high-complexity paths.
-2. If policy prefers zero suppressions, design a fee-math refactor plan with explicit migration tests for fee output compatibility.
+1. Decide whether to keep or refactor `_calculateVolatility` complexity (`cyclomatic-complexity` informational).
+2. If policy prefers zero suppressions/false positives, evaluate replacing comment suppressions with detector config.
 3. Keep validating with:
    - `forge test --gas-report`
    - `forge snapshot`
@@ -95,6 +106,7 @@
 ```powershell
 $env:PATH = "$env:USERPROFILE\.foundry\bin;$env:PATH"
 forge test --gas-report
+forge snapshot --check .gas-snapshot
 slither . --json slither-report.latest.json
 git status --short --branch --ignore-submodules=all
 ```
