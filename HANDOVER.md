@@ -4,7 +4,7 @@
 - Date: 2026-02-14
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `71ed203`
+- Remote state: `origin/master` is at `b91cbbb`
 - Working tree status at handover: clean
 
 ## What Was Completed
@@ -12,14 +12,19 @@
 - Added rationale/impact in `DECISIONS.md` for the accepted arithmetic order.
 - Reduced Slither `shadowing-local` noise in `src/` by renaming `MockERC20` constructor args (`name`/`symbol` -> `name_`/`symbol_`).
 - Added formal triage decision for remaining `src/` Low/Informational findings in `DECISIONS.md`.
+- Added CI workflow `.github/workflows/ci.yml` for Foundry checks on push/PR (`master`).
+- Enforced gas baseline consistency in CI with `forge snapshot --check .gas-snapshot`.
+- Added CI gas-baseline enforcement rationale in `DECISIONS.md`.
 - Refreshed static analysis report to `slither-report.latest.json`.
 - Added formal gas baseline artifact via `forge snapshot` (`.gas-snapshot`).
 - Committed and pushed to GitHub:
+  - `b91cbbb` `ci: enforce gas snapshot baseline in workflow`
+  - `51ed358` `docs: refresh handover notes after src triage`
   - `71ed203` `chore: triage remaining slither findings in src`
-  - `f7be103` `docs: refresh handover notes after slither triage`
-  - `e89eda6` `chore: triage slither finding and add gas baseline`
 
 ## Recent Commits
+- `b91cbbb` ci: enforce gas snapshot baseline in workflow
+- `51ed358` docs: refresh handover notes after src triage
 - `71ed203` chore: triage remaining slither findings in src
 - `f7be103` docs: refresh handover notes after slither triage
 - `e89eda6` chore: triage slither finding and add gas baseline
@@ -40,6 +45,17 @@
 - Artifact: `.gas-snapshot`
 - Notable gas datapoint:
   - `VolatilityDynamicFeeHookTest:test_feeCurve_rounding_regression_legacyBehavior()`: `10277`
+- Baseline check command:
+  - `forge snapshot --check .gas-snapshot` (pass)
+
+### CI (GitHub Actions)
+- Workflow: `.github/workflows/ci.yml`
+- Trigger:
+  - `push` to `master`
+  - `pull_request` targeting `master`
+- Enforced steps:
+  - `forge test`
+  - `forge snapshot --check .gas-snapshot`
 
 ### Slither rerun
 - Command run: `slither . --json slither-report.latest.json`
@@ -60,12 +76,13 @@
   - `IPoolManager.updateDynamicLPFee(PoolKey, uint24)`
 
 ## Recommended Next Actions
-1. Decide whether `.gas-snapshot` should be a required tracked artifact in CI.
+1. Confirm CI execution status on GitHub for commit `b91cbbb`.
 2. If policy prefers fewer accepted warnings, evaluate refactors for time-dependent checks (`timestamp`) and high-complexity paths.
 3. If policy prefers zero suppressions, design a fee-math refactor plan with explicit migration tests for fee output compatibility.
 4. Keep validating with:
    - `forge test --gas-report`
    - `forge snapshot`
+   - `forge snapshot --check .gas-snapshot`
    - `slither . --json slither-report.latest.json`
 
 ## Quick Restart Commands (PowerShell)
