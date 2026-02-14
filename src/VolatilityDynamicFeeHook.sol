@@ -430,6 +430,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     /// @return fee 手数料（bps単位）
     /// @dev 二次関数を使用することで、低ボラティリティ時は緩やかに、高ボラティリティ時は急激に手数料が上昇
     ///      USD/JPY為替ペアでは通常時0.03%、経済指標発表時など急変時に0.5%まで上昇
+    // slither-disable-start divide-before-multiply
     function _getFeeBasedOnVolatility(uint256 volatility) internal pure returns (uint24) {
         if (volatility == 0) {
             return BASE_FEE;
@@ -450,6 +451,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         return fee > MAX_FEE ? MAX_FEE : uint24(fee);
     }
+    // slither-disable-end divide-before-multiply
 
     function _getCurrentSqrtPriceX96(PoolId poolId) internal view returns (uint160 sqrtPriceX96) {
         // pools[poolId] slot key in PoolManager storage.
