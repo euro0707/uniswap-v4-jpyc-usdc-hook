@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test-and-gas-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Show Foundry Version
+        run: forge --version
+
+      - name: Run Tests
+        run: forge test
+
+      - name: Enforce Gas Snapshot Baseline
+        run: forge snapshot --check .gas-snapshot

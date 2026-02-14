@@ -58,3 +58,20 @@ We reviewed each finding to separate actionable noise from design-expected behav
 - `forge test --match-contract MockERC20Test` passed (`4 passed, 0 failed`).
 - Re-ran `slither . --json slither-report.latest.json`.
 - Current `src/` findings summary: `Low: 5`, `Informational: 4`, `Medium: 0`.
+
+## 2026-02-14 - CI Gas Snapshot Enforcement
+
+### Background
+We started tracking `.gas-snapshot` as a baseline artifact, but there was no CI workflow to prevent accidental drift.
+
+### Decision
+Add GitHub Actions workflow `.github/workflows/ci.yml` and enforce:
+- `forge test`
+- `forge snapshot --check .gas-snapshot`
+
+### Impact
+- Pull requests fail when gas snapshots are stale.
+- Gas baseline updates become explicit and reviewable in diffs.
+
+### Validation
+- Locally verified `forge snapshot --check .gas-snapshot` passes with current baseline.
