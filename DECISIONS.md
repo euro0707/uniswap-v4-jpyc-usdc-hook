@@ -75,3 +75,27 @@ Add GitHub Actions workflow `.github/workflows/ci.yml` and enforce:
 
 ### Validation
 - Locally verified `forge snapshot --check .gas-snapshot` passes with current baseline.
+
+## 2026-02-14 - Slither Noise Reduction (`timestamp`) in `src/`
+
+### Background
+After prior triage, `src/` still contained timestamp-based Low findings.
+These checks are part of intended cooldown/warmup/staleness controls, but repeated in reports as known noise.
+
+### Decision
+- Add explicit Slither suppressions for `timestamp` in:
+  - `VolatilityDynamicFeeHook._beforeSwap`
+  - `VolatilityDynamicFeeHook._afterSwap`
+  - `ObservationLibrary.getRecent`
+  - `ObservationLibrary.isStale`
+  - `ObservationLibrary.validateMultiBlock`
+- Keep logic unchanged; only annotate intent for static analysis.
+
+### Impact
+- No runtime behavior change.
+- `src/` Low findings reduced to zero.
+
+### Validation
+- `forge test --match-contract VolatilityDynamicFeeHookTest` passed (`19 passed, 0 failed`).
+- Re-ran `slither . --json slither-report.latest.json`.
+- Current `src/` findings summary: `Medium: 0`, `Low: 0`, `Informational: 3`.

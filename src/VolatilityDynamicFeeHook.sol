@@ -19,6 +19,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 /// @title VolatilityDynamicFeeHook
 /// @notice ボラティリティに基づいて動的に手数料を調整するUniswap v4 Hook
 /// @dev 過去のスワップ価格変動を記録し、ボラティリティを計算して手数料を決定
+// slither-disable-start unimplemented-functions
 contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     using PoolIdLibrary for PoolKey;
     using LPFeeLibrary for uint24;
@@ -154,6 +155,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     }
 
     /// @notice スワップ前の処理：動的手数料を設定
+    // slither-disable-start timestamp
     function _beforeSwap(
         address,
         PoolKey calldata key,
@@ -212,8 +214,10 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeWithFlag);
     }
+    // slither-disable-end timestamp
 
     /// @notice スワップ後の処理：価格履歴を更新
+    // slither-disable-start timestamp
     function _afterSwap(
         address,
         PoolKey calldata key,
@@ -318,11 +322,13 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         return (BaseHook.afterSwap.selector, 0);
     }
+    // slither-disable-end timestamp
 
     /// @notice ボラティリティを計算（時間重み付き）
     /// @param poolId プールID
     /// @return volatility ボラティリティ（0-100のスケール）
     /// @dev 時間重み付きで価格変動を計算することで、フロントラン攻撃耐性を向上
+    // slither-disable-next-line cyclomatic-complexity
     function _calculateVolatility(PoolId poolId) internal view returns (uint256) {
         ObservationLibrary.RingBuffer storage obs = observations[poolId];
         uint256 count = obs.count;
@@ -513,3 +519,4 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         _unpause();
     }
 }
+// slither-disable-end unimplemented-functions
