@@ -109,7 +109,7 @@
   - `IPoolManager.updateDynamicLPFee(PoolKey, uint24)`
 
 ## Recommended Next Actions
-1. If `_getFeeBasedOnVolatility` or `VolatilityDynamicFeeHook` line mapping changes, refresh `config/slither.db.json` IDs for accepted findings.
+1. If `_getFeeBasedOnVolatility` or `VolatilityDynamicFeeHook` line mapping changes, refresh `config/slither.db.json` IDs for accepted findings (see `config/SLITHER_TRIAGE.md`).
 2. If you later refactor `_calculateVolatility`, treat it as a behavior-sensitive change and require gas + regression snapshot refresh in the same PR.
 3. Keep validating with:
    - `forge test --gas-report`

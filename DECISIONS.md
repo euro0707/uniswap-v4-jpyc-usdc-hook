@@ -174,3 +174,4 @@ To keep detector coverage while reducing source annotation noise, we moved these
 - `slither . --json slither-report.triage-verify.json` completed with config + triage DB.
 - Verified `src/` detector set from JSON no longer includes `divide-before-multiply` or `unimplemented-functions`.
 - `forge test --match-test test_feeCurve_rounding_regression_legacyBehavior` passed (`1 passed, 0 failed`).
+- Added maintenance note for triage ID drift and refresh steps in `config/SLITHER_TRIAGE.md`.
