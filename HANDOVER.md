@@ -4,7 +4,7 @@
 - Date: 2026-02-15
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `d4287d0`
+- Remote state: `origin/master` is at `08177e1`
 - Working tree status at handover: clean before this handover-doc update
 
 ## What Was Completed
@@ -29,7 +29,14 @@
 - Migrated `timestamp` Slither suppressions from inline comments to `slither.config.json` (`detectors_to_exclude: "timestamp"`).
 - Re-ran local validation baseline on 2026-02-15 (`forge test`, `forge snapshot`, `forge snapshot --check`, `slither`).
 - Migrated `divide-before-multiply` / `unimplemented-functions` suppressions from inline comments to `config/slither.db.json` and removed the corresponding inline directives from `src/VolatilityDynamicFeeHook.sol`.
+- Added triage DB maintenance note `config/SLITHER_TRIAGE.md` and linked it from docs.
+- Refreshed triage ID after line-mapping drift on `divide-before-multiply`.
+- Investigated CI failure on gas baseline check, refreshed `.gas-snapshot`, and re-ran checks locally.
 - Committed and pushed to GitHub:
+  - `08177e1` `chore: refresh gas snapshot baseline`
+  - `d48f838` `chore: refresh slither triage id`
+  - `aa92ad9` `docs: add slither triage maintenance note`
+  - `92d7fa8` `chore: migrate slither suppressions to triage db`
   - `9a951d3` `docs: refresh handover after timestamp suppression migration`
   - `c588ee3` `chore: migrate slither timestamp suppression to config`
   - `cccc0ea` `docs: finalize end-of-day handover notes`
@@ -40,6 +47,11 @@
   - `51ed358` `docs: refresh handover notes after src triage`
 
 ## Recent Commits
+- `08177e1` chore: refresh gas snapshot baseline
+- `d48f838` chore: refresh slither triage id
+- `aa92ad9` docs: add slither triage maintenance note
+- `92d7fa8` chore: migrate slither suppressions to triage db
+- `d4287d0` docs: update handover with latest ci success
 - `9a951d3` docs: refresh handover after timestamp suppression migration
 - `c588ee3` chore: migrate slither timestamp suppression to config
 - `cccc0ea` docs: finalize end-of-day handover notes
@@ -80,9 +92,12 @@
   - `forge test`
   - `forge snapshot --check .gas-snapshot`
 - Latest verified run:
-  - Commit: `9a951d31a5f040d87437a62fdd70b4d040342987`
+  - Commit: `08177e1eb5adf790aaad46fd1c5cee9059f1b8ed`
   - Workflow result: `success`
-  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22042653637`
+  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22043392792`
+- Previous run note:
+  - `22043283077` (`d48f838`) failed at `Enforce Gas Snapshot Baseline`.
+  - Fixed by updating `.gas-snapshot` in `08177e1`.
 
 ### Slither rerun
 - Command run: `slither . --json slither-report.triage-verify.json`
