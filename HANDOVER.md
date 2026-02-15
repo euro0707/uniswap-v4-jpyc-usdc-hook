@@ -4,7 +4,7 @@
 - Date: 2026-02-15
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `9a951d3`
+- Remote state: `origin/master` is at `d4287d0`
 - Working tree status at handover: clean before this handover-doc update
 
 ## What Was Completed
@@ -28,6 +28,7 @@
 - Decided to keep `_calculateVolatility` complexity as accepted informational risk (no refactor in this cycle), recorded in `DECISIONS.md`.
 - Migrated `timestamp` Slither suppressions from inline comments to `slither.config.json` (`detectors_to_exclude: "timestamp"`).
 - Re-ran local validation baseline on 2026-02-15 (`forge test`, `forge snapshot`, `forge snapshot --check`, `slither`).
+- Migrated `divide-before-multiply` / `unimplemented-functions` suppressions from inline comments to `config/slither.db.json` and removed the corresponding inline directives from `src/VolatilityDynamicFeeHook.sol`.
 - Committed and pushed to GitHub:
   - `9a951d3` `docs: refresh handover after timestamp suppression migration`
   - `c588ee3` `chore: migrate slither timestamp suppression to config`
@@ -84,20 +85,19 @@
   - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22042653637`
 
 ### Slither rerun
-- Command run: `slither . --json slither-report.latest.json`
-- Report refreshed to: `slither-report.latest.json`
+- Command run: `slither . --json slither-report.triage-verify.json`
+- Report refreshed to: `slither-report.triage-verify.json`
 - Current `src/` findings summary:
   - `Medium: 0`
   - `Low: 0`
-  - `Informational: 3`
+  - `Informational: 2`
 - Note:
-  - Remaining `divide-before-multiply` detections are in dependency libraries under `lib/v4-core/src/`, not in project `src/`.
+  - `divide-before-multiply` in `_getFeeBasedOnVolatility` is now triaged via `config/slither.db.json` (detector remains enabled).
   - Remaining `src/` informational checks are:
     - `cyclomatic-complexity` (`_calculateVolatility`)
-    - `unimplemented-functions` (known Slither false positive on `BaseHook`)
     - `pragma` (dependency version mix)
 - Latest local rerun (2026-02-15):
-  - Slither findings remain unchanged for `src/`: `Informational: 3` (`cyclomatic-complexity`, `pragma`, `unimplemented-functions`)
+  - Slither findings for `src/`: `Informational: 2` (`cyclomatic-complexity`, `pragma`)
   - Note: this Slither version does not overwrite existing JSON output; generate to a temporary file and then replace `slither-report.latest.json`.
 
 ## Context7 Notes (Uniswap v4 docs checked)
@@ -109,7 +109,7 @@
   - `IPoolManager.updateDynamicLPFee(PoolKey, uint24)`
 
 ## Recommended Next Actions
-1. If policy prefers fewer inline suppressions, evaluate whether `divide-before-multiply` and `unimplemented-functions` should also be moved to config/triage DB instead of source comments.
+1. If `_getFeeBasedOnVolatility` or `VolatilityDynamicFeeHook` line mapping changes, refresh `config/slither.db.json` IDs for accepted findings.
 2. If you later refactor `_calculateVolatility`, treat it as a behavior-sensitive change and require gas + regression snapshot refresh in the same PR.
 3. Keep validating with:
    - `forge test --gas-report`

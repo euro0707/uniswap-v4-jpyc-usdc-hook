@@ -1,0 +1,16 @@
+[
+  {
+    "id": "3bda7a9eb94b537088307ecfa0924f7a13b2c643661245014331dc90e4c607a2",
+    "check": "divide-before-multiply",
+    "impact": "Medium",
+    "confidence": "Medium",
+    "description": "Intentional legacy two-step rounding in _getFeeBasedOnVolatility."
+  },
+  {
+    "id": "0dee0e45a80c0e6982faadfd9c18fbb608990b0f9872e10d64bcef49b190f350",
+    "check": "unimplemented-functions",
+    "impact": "Informational",
+    "confidence": "High",
+    "description": "Known false positive for BaseHook.getHookPermissions override."
+  }
+]

@@ -151,3 +151,26 @@ To reduce source-code annotation noise, we evaluated config-based suppression in
 - `forge test --match-contract VolatilityDynamicFeeHookTest` passed (`19 passed, 0 failed`).
 - `slither . --json slither-report.tmp.json` completed with config loaded.
 - `src/` findings remained: `Informational: 3` (`cyclomatic-complexity`, `pragma`, `unimplemented-functions`).
+
+## 2026-02-15 - Migrate `divide-before-multiply` / `unimplemented-functions` to Triage DB
+
+### Background
+`divide-before-multiply` and `unimplemented-functions` were previously managed with inline source annotations.
+To keep detector coverage while reducing source annotation noise, we moved these two accepted findings to a triage database.
+
+### Decision
+- Add `triage_database: "config/slither.db.json"` in `slither.config.json`.
+- Add accepted finding IDs to `config/slither.db.json`:
+  - `3bda7a9eb94b537088307ecfa0924f7a13b2c643661245014331dc90e4c607a2` (`divide-before-multiply` in `_getFeeBasedOnVolatility`)
+  - `0dee0e45a80c0e6982faadfd9c18fbb608990b0f9872e10d64bcef49b190f350` (`unimplemented-functions` false positive on `BaseHook`)
+- Remove inline suppressions for these two checks from `src/VolatilityDynamicFeeHook.sol`.
+
+### Impact
+- No runtime behavior change.
+- Detector coverage is retained (checks still run), while only accepted findings are hidden via triage DB.
+- `src/` findings drop from 3 informational items to 2 (`cyclomatic-complexity`, `pragma`).
+
+### Validation
+- `slither . --json slither-report.triage-verify.json` completed with config + triage DB.
+- Verified `src/` detector set from JSON no longer includes `divide-before-multiply` or `unimplemented-functions`.
+- `forge test --match-test test_feeCurve_rounding_regression_legacyBehavior` passed (`1 passed, 0 failed`).

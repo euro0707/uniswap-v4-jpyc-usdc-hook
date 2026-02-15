@@ -19,7 +19,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 /// @title VolatilityDynamicFeeHook
 /// @notice ボラティリティに基づいて動的に手数料を調整するUniswap v4 Hook
 /// @dev 過去のスワップ価格変動を記録し、ボラティリティを計算して手数料を決定
-// slither-disable-start unimplemented-functions
+
 contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     using PoolIdLibrary for PoolKey;
     using LPFeeLibrary for uint24;
@@ -324,7 +324,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     /// @param poolId プールID
     /// @return volatility ボラティリティ（0-100のスケール）
     /// @dev 時間重み付きで価格変動を計算することで、フロントラン攻撃耐性を向上
-    // slither-disable-next-line cyclomatic-complexity
     function _calculateVolatility(PoolId poolId) internal view returns (uint256) {
         ObservationLibrary.RingBuffer storage obs = observations[poolId];
         uint256 count = obs.count;
@@ -334,83 +333,11 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             return 0;
         }
 
-        // 有効な観測数を事前にカウント
-        uint256 validObservations = 0;
-        for (uint256 i = 0; i < count; i++) {
-            if (obs.data[i].sqrtPriceX96 > 0 && obs.data[i].timestamp > 0) {
-                validObservations++;
-            }
+        if (_countValidObservations(obs, count) < 2) {
+            return 0;
         }
 
-        if (validObservations < 2) {
-            return 0;  // 有効な観測が不足
-        }
-
-        // 時間重み付き価格変動率の合計を計算
-        uint256 weightedVariation = 0;
-        uint256 totalWeight = 0;
-        uint256 currentIndex = obs.index == 0 ? 99 : obs.index - 1;
-
-        for (uint256 i = 1; i < count; i++) {
-            ObservationLibrary.Observation storage current = obs.data[currentIndex];
-
-            // ひとつ前のインデックスを計算
-            uint256 prevIndex = currentIndex == 0 ? 99 : currentIndex - 1;
-            ObservationLibrary.Observation storage previous = obs.data[prevIndex];
-
-            // previousSqrtPrice が 0 の場合はスキップしてゼロ除算を防ぐ
-            if (previous.sqrtPriceX96 == 0 || current.timestamp <= previous.timestamp) {
-                currentIndex = prevIndex;
-                continue;
-            }
-
-            // 時間の重み: 最近の観測に指数関数的に高い重みを付与
-            // recencyWeight = 2^(count - i) で最新ほど重くする
-            uint256 recencyWeight = 1 << (count > i + 10 ? 10 : count - i - 1); // Cap at 2^10 to prevent overflow
-            uint256 timeDelta = current.timestamp - previous.timestamp;
-
-            // 時間重みに上限を設定（長時間の観測が支配的にならないよう）
-            uint256 MAX_TIME_WEIGHT = 1 hours;
-            uint256 timeWeight = timeDelta > MAX_TIME_WEIGHT ? MAX_TIME_WEIGHT : timeDelta;
-            timeWeight = timeWeight > 0 ? timeWeight : 1;
-
-            // 合成重み = recencyWeight * timeWeight
-            uint256 weight = recencyWeight * timeWeight;
-
-            // sqrtPriceX96を使って変動を計算（絶対値）
-            // price = sqrtPrice^2 なので、変動率 = |currSqrt^2 - prevSqrt^2| / prevSqrt^2
-            // FullMath を使用してオーバーフロー安全に計算（_afterSwap と同じ精度）
-            uint256 curSqrt = uint256(current.sqrtPriceX96);
-            uint256 prevSqrt = uint256(previous.sqrtPriceX96);
-            uint256 variation;
-            if (curSqrt > prevSqrt) {
-                uint256 diff = curSqrt - prevSqrt;
-                uint256 temp = FullMath.mulDiv(curSqrt + prevSqrt, diff, prevSqrt);
-                variation = FullMath.mulDiv(temp, 10000, prevSqrt);
-            } else {
-                uint256 diff = prevSqrt - curSqrt;
-                uint256 temp = FullMath.mulDiv(curSqrt + prevSqrt, diff, prevSqrt);
-                variation = FullMath.mulDiv(temp, 10000, prevSqrt);
-            }
-
-            // 時間重み付き変動を加算（オーバーフローチェック付き）
-            uint256 weightedTerm = variation * weight;
-
-            // オーバーフローチェック: 加算前と加算後を比較
-            uint256 newWeightedVariation = weightedVariation + weightedTerm;
-            if (newWeightedVariation < weightedVariation) {
-                // オーバーフロー検出 → 最大値でキャップして終了
-                weightedVariation = type(uint256).max / 2; // 除算を考慮して半分に
-                totalWeight = totalWeight > 0 ? totalWeight : 1; // ゼロ除算防止
-                break;
-            }
-
-            weightedVariation = newWeightedVariation;
-            totalWeight += weight;
-            currentIndex = prevIndex;
-        }
-
-        // 重みの合計がゼロの場合は0を返す
+        (uint256 weightedVariation, uint256 totalWeight) = _accumulateWeightedVariation(obs, count);
         if (totalWeight == 0) {
             return 0;
         }
@@ -427,12 +354,104 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         return scaledVolatility > 100 ? 100 : scaledVolatility;
     }
 
+    function _countValidObservations(ObservationLibrary.RingBuffer storage obs, uint256 count)
+        internal
+        view
+        returns (uint256 validObservations)
+    {
+        for (uint256 i = 0; i < count; i++) {
+            if (obs.data[i].sqrtPriceX96 > 0 && obs.data[i].timestamp > 0) {
+                validObservations++;
+            }
+        }
+    }
+
+    function _accumulateWeightedVariation(ObservationLibrary.RingBuffer storage obs, uint256 count)
+        internal
+        view
+        returns (uint256 weightedVariation, uint256 totalWeight)
+    {
+        uint256 currentIndex = _previousRingIndex(obs.index);
+
+        for (uint256 i = 1; i < count; i++) {
+            ObservationLibrary.Observation storage current = obs.data[currentIndex];
+            uint256 prevIndex = _previousRingIndex(currentIndex);
+            ObservationLibrary.Observation storage previous = obs.data[prevIndex];
+
+            // previousSqrtPrice が 0 の場合はスキップしてゼロ除算を防ぐ
+            if (previous.sqrtPriceX96 == 0 || current.timestamp <= previous.timestamp) {
+                currentIndex = prevIndex;
+                continue;
+            }
+
+            // 時間の重み: 最近の観測に指数関数的に高い重みを付与
+            // recencyWeight = 2^(count - i) で最新ほど重くする
+            uint256 recencyWeight = _recencyWeight(count, i);
+            uint256 timeWeight = _timeWeight(current.timestamp - previous.timestamp);
+
+            // 合成重み = recencyWeight * timeWeight
+            uint256 weight = recencyWeight * timeWeight;
+            uint256 variation = _variationBps(current.sqrtPriceX96, previous.sqrtPriceX96);
+
+            // 時間重み付き変動を加算（オーバーフローチェック付き）
+            uint256 weightedTerm = variation * weight;
+            uint256 newWeightedVariation = weightedVariation + weightedTerm;
+            if (newWeightedVariation < weightedVariation) {
+                // オーバーフロー検出 → 最大値でキャップして終了
+                weightedVariation = type(uint256).max / 2; // 除算を考慮して半分に
+                totalWeight = totalWeight > 0 ? totalWeight : 1; // ゼロ除算防止
+                break;
+            }
+
+            weightedVariation = newWeightedVariation;
+            totalWeight += weight;
+            currentIndex = prevIndex;
+        }
+    }
+
+    function _variationBps(uint160 currentSqrtPriceX96, uint160 previousSqrtPriceX96)
+        internal
+        pure
+        returns (uint256 variation)
+    {
+        // sqrtPriceX96を使って変動を計算（絶対値）
+        // price = sqrtPrice^2 なので、変動率 = |currSqrt^2 - prevSqrt^2| / prevSqrt^2
+        // FullMath を使用してオーバーフロー安全に計算（_afterSwap と同じ精度）
+        uint256 curSqrt = uint256(currentSqrtPriceX96);
+        uint256 prevSqrt = uint256(previousSqrtPriceX96);
+
+        if (curSqrt > prevSqrt) {
+            uint256 diff = curSqrt - prevSqrt;
+            uint256 temp = FullMath.mulDiv(curSqrt + prevSqrt, diff, prevSqrt);
+            variation = FullMath.mulDiv(temp, 10000, prevSqrt);
+        } else {
+            uint256 diff = prevSqrt - curSqrt;
+            uint256 temp = FullMath.mulDiv(curSqrt + prevSqrt, diff, prevSqrt);
+            variation = FullMath.mulDiv(temp, 10000, prevSqrt);
+        }
+    }
+
+    function _recencyWeight(uint256 count, uint256 offsetFromLatest) internal pure returns (uint256) {
+        uint256 exponent = count > offsetFromLatest + 10 ? 10 : count - offsetFromLatest - 1;
+        return 1 << exponent;
+    }
+
+    function _timeWeight(uint256 timeDelta) internal pure returns (uint256) {
+        // 時間重みに上限を設定（長時間の観測が支配的にならないよう）
+        uint256 maxTimeWeight = 1 hours;
+        uint256 clamped = timeDelta > maxTimeWeight ? maxTimeWeight : timeDelta;
+        return clamped > 0 ? clamped : 1;
+    }
+
+    function _previousRingIndex(uint256 index) internal pure returns (uint256) {
+        return index == 0 ? 99 : index - 1;
+    }
+
     /// @notice ボラティリティに基づいて手数料を決定（二次関数カーブ）
     /// @param volatility ボラティリティ（0-100）
     /// @return fee 手数料（bps単位）
     /// @dev 二次関数を使用することで、低ボラティリティ時は緩やかに、高ボラティリティ時は急激に手数料が上昇
     ///      USD/JPY為替ペアでは通常時0.03%、経済指標発表時など急変時に0.5%まで上昇
-    // slither-disable-start divide-before-multiply
     function _getFeeBasedOnVolatility(uint256 volatility) internal pure returns (uint24) {
         if (volatility == 0) {
             return BASE_FEE;
@@ -453,7 +472,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         return fee > MAX_FEE ? MAX_FEE : uint24(fee);
     }
-    // slither-disable-end divide-before-multiply
 
     function _getCurrentSqrtPriceX96(PoolId poolId) internal view returns (uint160 sqrtPriceX96) {
         // pools[poolId] slot key in PoolManager storage.
@@ -515,4 +533,3 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         _unpause();
     }
 }
-// slither-disable-end unimplemented-functions
