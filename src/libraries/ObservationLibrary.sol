@@ -39,7 +39,6 @@ library ObservationLibrary {
     }
     
     /// @notice Get observations within timeframe
-    // slither-disable-start timestamp
     function getRecent(
         RingBuffer storage self,
         uint256 timeframe
@@ -57,14 +56,12 @@ library ObservationLibrary {
             }
         }
     }
-    // slither-disable-end timestamp
     
     /// @notice Check if all observations are stale (older than threshold)
     /// @dev Used to detect long periods of inactivity and trigger ring reset
     /// @param self Ring buffer of observations
     /// @param stalenessThreshold Time threshold in seconds (e.g., 30 minutes)
     /// @return isStale True if all observations are older than threshold
-    // slither-disable-start timestamp
     function isStale(
         RingBuffer storage self,
         uint256 stalenessThreshold
@@ -86,7 +83,6 @@ library ObservationLibrary {
 
         return true; // All observations are stale
     }
-    // slither-disable-end timestamp
 
     /// @notice Reset ring buffer to accept new observations after staleness
     /// @dev Clears all existing observations and resets counters
@@ -102,7 +98,6 @@ library ObservationLibrary {
     /// @param self Ring buffer of observations
     /// @param minBlocks Minimum number of unique blocks required
     /// @return isValid True if observations span enough blocks
-    // slither-disable-start timestamp
     // slither-disable-start cyclomatic-complexity
     function validateMultiBlock(
         RingBuffer storage self,
@@ -164,7 +159,6 @@ library ObservationLibrary {
         return uniqueBlocks >= minBlocks;
     }
     // slither-disable-end cyclomatic-complexity
-    // slither-disable-end timestamp
 
     /// @notice Calculate maximum price change in recent observations
     /// @param self Ring buffer of observations

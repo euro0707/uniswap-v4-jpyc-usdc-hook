@@ -99,3 +99,55 @@ These checks are part of intended cooldown/warmup/staleness controls, but repeat
 - `forge test --match-contract VolatilityDynamicFeeHookTest` passed (`19 passed, 0 failed`).
 - Re-ran `slither . --json slither-report.latest.json`.
 - Current `src/` findings summary: `Medium: 0`, `Low: 0`, `Informational: 3`.
+
+## 2026-02-15 - `_calculateVolatility` Cyclomatic Complexity
+
+### Background
+Slither still reports `cyclomatic-complexity` (Informational) for `_calculateVolatility`.
+We reviewed whether to refactor into helper functions now or keep the current implementation.
+
+### Decision
+Keep `_calculateVolatility` as-is for now and retain the existing function-scoped complexity suppression.
+Do not perform a structural refactor in this cycle.
+
+### Impact
+- No runtime behavior change.
+- No gas-profile drift risk from control-flow changes in the volatility path.
+- Static analysis keeps one accepted Informational finding for this function.
+
+### Validation
+- Run full baseline checks:
+  - `forge test --gas-report`
+  - `forge snapshot`
+  - `forge snapshot --check .gas-snapshot`
+  - `slither . --json slither-report.tmp.json` then replace `slither-report.latest.json`
+- 2026-02-15 rerun results:
+  - `forge test --gas-report`: `57 passed, 0 failed, 0 skipped`
+  - `forge snapshot`: `57 passed, 0 failed, 0 skipped`
+  - `forge snapshot --check .gas-snapshot`: pass
+  - `slither` (`src/` scope): `Informational: 3` (`cyclomatic-complexity`, `pragma`, `unimplemented-functions`)
+
+## 2026-02-15 - Migrate `timestamp` Slither Suppressions to Config
+
+### Background
+`timestamp` detector noise was previously handled with inline `slither-disable` comments in `src/`.
+To reduce source-code annotation noise, we evaluated config-based suppression instead.
+
+### Decision
+- Add `slither.config.json` with `detectors_to_exclude: "timestamp"`.
+- Remove inline `timestamp` suppressions from:
+  - `VolatilityDynamicFeeHook._beforeSwap`
+  - `VolatilityDynamicFeeHook._afterSwap`
+  - `ObservationLibrary.getRecent`
+  - `ObservationLibrary.isStale`
+  - `ObservationLibrary.validateMultiBlock`
+
+### Impact
+- No runtime behavior change.
+- Slither `timestamp` triage is centralized in config instead of inline comments.
+- Slither runs 99 detectors (was 100) due config exclusion.
+
+### Validation
+- `forge test --match-contract VolatilityDynamicFeeHookTest` passed (`19 passed, 0 failed`).
+- `slither . --json slither-report.tmp.json` completed with config loaded.
+- `src/` findings remained: `Informational: 3` (`cyclomatic-complexity`, `pragma`, `unimplemented-functions`).

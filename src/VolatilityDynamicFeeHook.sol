@@ -155,7 +155,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     }
 
     /// @notice スワップ前の処理：動的手数料を設定
-    // slither-disable-start timestamp
     function _beforeSwap(
         address,
         PoolKey calldata key,
@@ -214,10 +213,8 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeWithFlag);
     }
-    // slither-disable-end timestamp
 
     /// @notice スワップ後の処理：価格履歴を更新
-    // slither-disable-start timestamp
     function _afterSwap(
         address,
         PoolKey calldata key,
@@ -322,7 +319,6 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
         return (BaseHook.afterSwap.selector, 0);
     }
-    // slither-disable-end timestamp
 
     /// @notice ボラティリティを計算（時間重み付き）
     /// @param poolId プールID
