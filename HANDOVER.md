@@ -4,7 +4,7 @@
 - Date: 2026-02-15
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `c588ee3`
+- Remote state: `origin/master` is at `9a951d3`
 - Working tree status at handover: clean before this handover-doc update
 
 ## What Was Completed
@@ -18,6 +18,7 @@
 - Enforced gas baseline consistency in CI with `forge snapshot --check .gas-snapshot`.
 - Added CI gas-baseline enforcement rationale in `DECISIONS.md`.
 - Verified GitHub Actions runs for CI enforcement commits:
+  - `9a951d3` (`test-and-gas-baseline`) success
   - `c588ee3` (`test-and-gas-baseline`) success
   - `b91cbbb` (`run #1`) success
   - `b34e1b3` (`run #4`) success
@@ -28,6 +29,7 @@
 - Migrated `timestamp` Slither suppressions from inline comments to `slither.config.json` (`detectors_to_exclude: "timestamp"`).
 - Re-ran local validation baseline on 2026-02-15 (`forge test`, `forge snapshot`, `forge snapshot --check`, `slither`).
 - Committed and pushed to GitHub:
+  - `9a951d3` `docs: refresh handover after timestamp suppression migration`
   - `c588ee3` `chore: migrate slither timestamp suppression to config`
   - `cccc0ea` `docs: finalize end-of-day handover notes`
   - `b34e1b3` `chore: suppress timestamp slither noise in src`
@@ -37,6 +39,7 @@
   - `51ed358` `docs: refresh handover notes after src triage`
 
 ## Recent Commits
+- `9a951d3` docs: refresh handover after timestamp suppression migration
 - `c588ee3` chore: migrate slither timestamp suppression to config
 - `cccc0ea` docs: finalize end-of-day handover notes
 - `b34e1b3` chore: suppress timestamp slither noise in src
@@ -76,9 +79,9 @@
   - `forge test`
   - `forge snapshot --check .gas-snapshot`
 - Latest verified run:
-  - Commit: `c588ee363f20b8188a6e687c386f0b8ba551e4b3`
+  - Commit: `9a951d31a5f040d87437a62fdd70b4d040342987`
   - Workflow result: `success`
-  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22042197863`
+  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22042653637`
 
 ### Slither rerun
 - Command run: `slither . --json slither-report.latest.json`
