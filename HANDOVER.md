@@ -1,11 +1,11 @@
 # Handover Notes
 
 ## Snapshot
-- Date: 2026-02-15
+- Date: 2026-02-16
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `08177e1`
-- Working tree status at handover: clean before this handover-doc update
+- Remote state: `origin/master` is at `6df5873`
+- Working tree status at handover: clean after 2026-02-16 local validation rerun
 
 ## What Was Completed
 - Added function-scoped Slither triage for intentional legacy rounding in `_getFeeBasedOnVolatility` (`divide-before-multiply`).
@@ -32,6 +32,10 @@
 - Added triage DB maintenance note `config/SLITHER_TRIAGE.md` and linked it from docs.
 - Refreshed triage ID after line-mapping drift on `divide-before-multiply`.
 - Investigated CI failure on gas baseline check, refreshed `.gas-snapshot`, and re-ran checks locally.
+- Re-ran local validation baseline on 2026-02-16 (`forge test --gas-report`, `forge snapshot`, `forge snapshot --check`, `slither` temp-output flow).
+- Re-checked Uniswap v4 behavior notes via Context7 (`beforeSwap` `lpFeeOverride` conditions and `IPoolManager.updateDynamicLPFee` path).
+- Refreshed `slither-report.latest.json` from a temporary Slither JSON output in the current environment.
+- Confirmed no code/config changes were required after today's validation rerun.
 - Committed and pushed to GitHub:
   - `08177e1` `chore: refresh gas snapshot baseline`
   - `d48f838` `chore: refresh slither triage id`
@@ -47,6 +51,7 @@
   - `51ed358` `docs: refresh handover notes after src triage`
 
 ## Recent Commits
+- `6df5873` docs: refresh handover after triage and ci fix
 - `08177e1` chore: refresh gas snapshot baseline
 - `d48f838` chore: refresh slither triage id
 - `aa92ad9` docs: add slither triage maintenance note
@@ -100,20 +105,20 @@
   - Fixed by updating `.gas-snapshot` in `08177e1`.
 
 ### Slither rerun
-- Command run: `slither . --json slither-report.triage-verify.json`
-- Report refreshed to: `slither-report.triage-verify.json`
+- Command run: `slither . --json slither-report.tmp.json`
+- Report refreshed to: `slither-report.latest.json` (temporary JSON output copied into latest report)
 - Current `src/` findings summary:
   - `Medium: 0`
   - `Low: 0`
-  - `Informational: 2`
+  - `Informational: 1`
 - Note:
   - `divide-before-multiply` in `_getFeeBasedOnVolatility` is now triaged via `config/slither.db.json` (detector remains enabled).
-  - Remaining `src/` informational checks are:
-    - `cyclomatic-complexity` (`_calculateVolatility`)
-    - `pragma` (dependency version mix)
-- Latest local rerun (2026-02-15):
-  - Slither findings for `src/`: `Informational: 2` (`cyclomatic-complexity`, `pragma`)
-  - Note: this Slither version does not overwrite existing JSON output; generate to a temporary file and then replace `slither-report.latest.json`.
+  - `unimplemented-functions` (BaseHook override false positive) is triaged via `config/slither.db.json`.
+  - Remaining `src/` informational check is `pragma` (dependency version mix).
+- Latest local rerun (2026-02-16):
+  - Slither findings for `src/`: `Informational: 1` (`pragma`)
+  - This environment requires Foundry on `PATH` for Slither (`forge` invocation by crytic-compile).
+  - Slither exits non-zero when findings exist; keep using temporary JSON output and copy to `slither-report.latest.json`.
 
 ## Context7 Notes (Uniswap v4 docs checked)
 - `beforeSwap` `lpFeeOverride` is applied only when:
@@ -138,6 +143,6 @@ $env:PATH = "$env:USERPROFILE\.foundry\bin;$env:PATH"
 forge test --gas-report
 forge snapshot --check .gas-snapshot
 slither . --json slither-report.tmp.json
-Copy-Item slither-report.tmp.json slither-report.latest.json -Force; Remove-Item slither-report.tmp.json
+if (Test-Path slither-report.tmp.json) { Copy-Item slither-report.tmp.json slither-report.latest.json -Force; Remove-Item slither-report.tmp.json -Force }
 git status --short --branch --ignore-submodules=all
 ```
