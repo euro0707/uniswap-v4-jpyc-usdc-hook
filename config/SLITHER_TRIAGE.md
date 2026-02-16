@@ -7,6 +7,8 @@
 - Finding `id` can change when source line mapping changes.
 - Typical triggers: edits around `src/VolatilityDynamicFeeHook.sol` contract header or `_getFeeBasedOnVolatility`.
 - If IDs drift, accepted findings can reappear in Slither output.
+- Maintain only findings that are still detector-enabled (`divide-before-multiply`, `unimplemented-functions`).
+- `timestamp` is excluded at detector level in `slither.config.json` (`detectors_to_exclude`) and should not be tracked in triage DB.
 
 ## Refresh Procedure
 

@@ -189,11 +189,13 @@ After documenting the 2026-02-16 validation rerun, we rechecked that:
 - Keep triage DB strategy for accepted findings:
   - `divide-before-multiply` accepted by ID in `config/slither.db.json` (latest ID: `1a336469e5420a97132a10d00f8370c3e69f78e191431c12bb008834106cd5a6`).
   - `unimplemented-functions` accepted false positive by ID in `config/slither.db.json` (`0dee0e45a80c0e6982faadfd9c18fbb608990b0f9872e10d64bcef49b190f350`).
+- Keep `timestamp` out of `config/slither.db.json` because `timestamp` is detector-excluded in `slither.config.json`.
 - Treat current remaining `src/` Slither signal as dependency-driven `pragma` informational only.
 
 ### Impact
 - No runtime behavior change.
 - Triage maintenance remains explicit and centralized in config.
+- Keep triage DB maintenance surface minimal by tracking only detector-enabled accepted findings.
 - Current `src/` static-analysis baseline is reduced to one informational item (`pragma`).
 
 ### Validation
@@ -202,6 +204,7 @@ After documenting the 2026-02-16 validation rerun, we rechecked that:
   - `forge snapshot`: `57 passed, 0 failed, 0 skipped`
   - `forge snapshot --check .gas-snapshot`: pass
   - `slither . --json slither-report.tmp.json` (temp-output flow): `src/` findings = `Informational: 1` (`pragma`)
+  - `slither . --show-ignored-findings --json slither-report.show-ignored.tmp.json`: confirmed DB IDs match current `src/` findings for `divide-before-multiply` and `unimplemented-functions`
 - CI verified:
   - `98a0660` run `22077060054`: `success`
   - `0322ca5` run `22077143825`: `success`
