@@ -175,3 +175,33 @@ To keep detector coverage while reducing source annotation noise, we moved these
 - Verified `src/` detector set from JSON no longer includes `divide-before-multiply` or `unimplemented-functions`.
 - `forge test --match-test test_feeCurve_rounding_regression_legacyBehavior` passed (`1 passed, 0 failed`).
 - Added maintenance note for triage ID drift and refresh steps in `config/SLITHER_TRIAGE.md`.
+
+## 2026-02-16 - Validation Baseline Refresh and CI Confirmation
+
+### Background
+After documenting the 2026-02-16 validation rerun, we rechecked that:
+- Slither triage DB suppressions still match current line mappings.
+- CI status reflects the latest `master` pushes.
+- Decision records reflect the current `src/` finding set.
+
+### Decision
+- Keep runtime logic unchanged (no contract refactor in this step).
+- Keep triage DB strategy for accepted findings:
+  - `divide-before-multiply` accepted by ID in `config/slither.db.json` (latest ID: `1a336469e5420a97132a10d00f8370c3e69f78e191431c12bb008834106cd5a6`).
+  - `unimplemented-functions` accepted false positive by ID in `config/slither.db.json` (`0dee0e45a80c0e6982faadfd9c18fbb608990b0f9872e10d64bcef49b190f350`).
+- Treat current remaining `src/` Slither signal as dependency-driven `pragma` informational only.
+
+### Impact
+- No runtime behavior change.
+- Triage maintenance remains explicit and centralized in config.
+- Current `src/` static-analysis baseline is reduced to one informational item (`pragma`).
+
+### Validation
+- Local rerun on 2026-02-16:
+  - `forge test --gas-report`: `57 passed, 0 failed, 0 skipped`
+  - `forge snapshot`: `57 passed, 0 failed, 0 skipped`
+  - `forge snapshot --check .gas-snapshot`: pass
+  - `slither . --json slither-report.tmp.json` (temp-output flow): `src/` findings = `Informational: 1` (`pragma`)
+- CI verified:
+  - `98a0660` run `22077060054`: `success`
+  - `0322ca5` run `22077143825`: `success`
