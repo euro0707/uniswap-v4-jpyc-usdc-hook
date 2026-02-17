@@ -1,5 +1,7 @@
 # Handover Notes
 
+> Latest handover (2026-02-17): `HANDOVER_ANTIGRAVITY_2026-02-17.md`
+
 ## Snapshot
 - Date: 2026-02-17
 - Repo: `uniswap-v4-dynamic-fee-hook`
