@@ -72,6 +72,41 @@ def src_check_counts(report: dict) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def src_check_ids(report: dict) -> dict[str, list[str]]:
+    ids: dict[str, list[str]] = {}
+    detectors = report.get("results", {}).get("detectors", [])
+    for detector in detectors:
+        elements = detector.get("elements") or []
+        has_src = False
+        for element in elements:
+            source_mapping = element.get("source_mapping") or {}
+            relative = source_mapping.get("filename_relative") or ""
+            normalized = relative.replace("\\", "/")
+            if normalized.startswith("./"):
+                normalized = normalized[2:]
+            if normalized.startswith("src/"):
+                has_src = True
+                break
+        if not has_src:
+            continue
+        check = detector.get("check")
+        finding_id = detector.get("id")
+        if not check or not finding_id:
+            continue
+        ids.setdefault(check, []).append(finding_id)
+    for check in ids:
+        ids[check] = sorted(set(ids[check]))
+    return dict(sorted(ids.items()))
+
+
+def format_check_ids(ids_by_check: dict[str, list[str]]) -> str:
+    parts: list[str] = []
+    for check, ids in ids_by_check.items():
+        joined = ",".join(ids)
+        parts.append(f"{check}=[{joined}]")
+    return "; ".join(parts) if parts else "none"
+
+
 def print_counts(title: str, counts: dict[str, int]) -> None:
     print(f"\n==> {title}")
     if not counts:
@@ -141,8 +176,11 @@ def main() -> int:
             allowed,
         )
 
-        visible = src_check_counts(load_json(TMP_REPORT))
-        ignored = src_check_counts(load_json(TMP_IGNORED_REPORT))
+        visible_report = load_json(TMP_REPORT)
+        ignored_report = load_json(TMP_IGNORED_REPORT)
+        visible = src_check_counts(visible_report)
+        ignored = src_check_counts(ignored_report)
+        visible_ids = src_check_ids(visible_report)
 
         print_counts("Slither src/ checks (visible)", visible)
         print_counts("Slither src/ checks (show-ignored-findings)", ignored)
@@ -150,7 +188,9 @@ def main() -> int:
         errors: list[str] = []
         if visible != EXPECTED_VISIBLE:
             errors.append(
-                f"Visible src baseline mismatch: expected {EXPECTED_VISIBLE}, got {visible}"
+                "Visible src baseline mismatch: "
+                f"expected {EXPECTED_VISIBLE}, got {visible}; "
+                f"ids {format_check_ids(visible_ids)}"
             )
         for check, minimum in REQUIRED_IGNORED_MIN.items():
             actual = ignored.get(check, 0)
