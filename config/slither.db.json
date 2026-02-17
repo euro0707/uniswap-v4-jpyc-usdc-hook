@@ -7,6 +7,13 @@
     "description": "Intentional legacy two-step rounding in _getFeeBasedOnVolatility."
   },
   {
+    "id": "f734f676bdffd5a07b40a7876e668fcb29b53057f41011b5fdb78de9026f8d1a",
+    "check": "divide-before-multiply",
+    "impact": "Medium",
+    "confidence": "Medium",
+    "description": "Intentional legacy two-step rounding in _getFeeBasedOnVolatility."
+  },
+  {
     "id": "0dee0e45a80c0e6982faadfd9c18fbb608990b0f9872e10d64bcef49b190f350",
     "check": "unimplemented-functions",
     "impact": "Informational",
