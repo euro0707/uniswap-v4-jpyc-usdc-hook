@@ -28,3 +28,11 @@ jobs:
 
       - name: Enforce Gas Snapshot Baseline
         run: forge snapshot --check .gas-snapshot
+
+      - name: Install Slither
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install slither-analyzer
+
+      - name: Enforce Slither src Baseline
+        run: python3 script/check_slither_src_baseline.py
