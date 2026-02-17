@@ -41,7 +41,8 @@ jobs:
           python3 script/check_slither_src_baseline.py > slither-baseline.log 2>&1
           status=$?
           if [ $status -ne 0 ]; then
-            reason=$(grep -E "Baseline validation failed|Visible src baseline mismatch|Ignored src baseline|Required tool not found|Missing expected report file|Command failed" -m 1 slither-baseline.log || true)
+            reason=$(grep -E "Visible src baseline mismatch|Ignored src baseline|Required tool not found|Missing expected report file|Command failed" -m 1 slither-baseline.log || true)
+            reason=${reason#- }
             if [ -z "$reason" ]; then
               reason=$(tail -n 20 slither-baseline.log | tr '\n' ' ' || true)
             fi
