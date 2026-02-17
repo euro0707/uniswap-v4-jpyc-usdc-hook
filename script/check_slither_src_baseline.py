@@ -13,6 +13,8 @@ from pathlib import Path
 
 TMP_REPORT = Path("slither-report.tmp.json")
 TMP_IGNORED_REPORT = Path("slither-report.show-ignored.tmp.json")
+SLITHER_CONFIG = Path("slither.config.json")
+SLITHER_TRIAGE_DB = Path("config") / "slither.db.json"
 
 # Current accepted baseline for this repository.
 EXPECTED_VISIBLE = {"pragma": 1}
@@ -107,18 +109,31 @@ def main() -> int:
 
     allowed = {0, 1, 255}
     slither_cmd = [sys.executable, "-m", "slither"]
+    slither_args = [
+        "--config-file",
+        str(SLITHER_CONFIG),
+        "--triage-database",
+        str(SLITHER_TRIAGE_DB),
+    ]
 
     try:
         ensure_tooling_on_path()
+        if not SLITHER_CONFIG.exists():
+            raise FileNotFoundError(f"Missing Slither config file: {SLITHER_CONFIG}")
+        if not SLITHER_TRIAGE_DB.exists():
+            raise FileNotFoundError(
+                f"Missing Slither triage database: {SLITHER_TRIAGE_DB}"
+            )
 
         remove_if_exists(TMP_REPORT)
         remove_if_exists(TMP_IGNORED_REPORT)
 
-        run_command([*slither_cmd, ".", "--json", str(TMP_REPORT)], allowed)
+        run_command([*slither_cmd, ".", *slither_args, "--json", str(TMP_REPORT)], allowed)
         run_command(
             [
                 *slither_cmd,
                 ".",
+                *slither_args,
                 "--show-ignored-findings",
                 "--json",
                 str(TMP_IGNORED_REPORT),
