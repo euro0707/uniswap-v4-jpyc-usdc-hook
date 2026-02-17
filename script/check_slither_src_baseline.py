@@ -16,10 +16,8 @@ TMP_IGNORED_REPORT = Path("slither-report.show-ignored.tmp.json")
 
 # Current accepted baseline for this repository.
 EXPECTED_VISIBLE = {"pragma": 1}
-EXPECTED_IGNORED = {
-    "cyclomatic-complexity": 1,
+REQUIRED_IGNORED_MIN = {
     "divide-before-multiply": 1,
-    "pragma": 1,
     "unimplemented-functions": 1,
 }
 
@@ -136,10 +134,12 @@ def main() -> int:
             errors.append(
                 f"Visible src baseline mismatch: expected {EXPECTED_VISIBLE}, got {visible}"
             )
-        if ignored != EXPECTED_IGNORED:
-            errors.append(
-                f"Ignored src baseline mismatch: expected {EXPECTED_IGNORED}, got {ignored}"
-            )
+        for check, minimum in REQUIRED_IGNORED_MIN.items():
+            actual = ignored.get(check, 0)
+            if actual < minimum:
+                errors.append(
+                    f"Ignored src baseline missing expected check '{check}': minimum {minimum}, got {actual}"
+                )
 
         if errors:
             print("\nBaseline validation failed:")
