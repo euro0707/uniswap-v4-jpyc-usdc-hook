@@ -89,9 +89,8 @@ def ensure_tooling_on_path() -> None:
     if foundry_bin.exists() and str(foundry_bin) not in path_entries:
         os.environ["PATH"] = f"{foundry_bin}{os.pathsep}{os.environ.get('PATH', '')}"
 
-    for tool in ("slither", "forge"):
-        if shutil.which(tool) is None:
-            raise RuntimeError(f"Required tool not found on PATH: {tool}")
+    if shutil.which("forge") is None:
+        raise RuntimeError("Required tool not found on PATH: forge")
 
 
 def main() -> int:
@@ -104,6 +103,7 @@ def main() -> int:
     args = parser.parse_args()
 
     allowed = {0, 1, 255}
+    slither_cmd = [sys.executable, "-m", "slither"]
 
     try:
         ensure_tooling_on_path()
@@ -111,10 +111,10 @@ def main() -> int:
         remove_if_exists(TMP_REPORT)
         remove_if_exists(TMP_IGNORED_REPORT)
 
-        run_command(["slither", ".", "--json", str(TMP_REPORT)], allowed)
+        run_command([*slither_cmd, ".", "--json", str(TMP_REPORT)], allowed)
         run_command(
             [
-                "slither",
+                *slither_cmd,
                 ".",
                 "--show-ignored-findings",
                 "--json",
