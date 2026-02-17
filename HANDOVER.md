@@ -4,8 +4,8 @@
 - Date: 2026-02-17
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `a132ca6`
-- Working tree status at handover: clean after 2026-02-17 local validation rerun
+- Remote state: `origin/master` is at `e242817`
+- Working tree status at handover: clean after 2026-02-17 validation + docs refresh
 
 ## What Was Completed
 - Added function-scoped Slither triage for intentional legacy rounding in `_getFeeBasedOnVolatility` (`divide-before-multiply`).
@@ -42,7 +42,9 @@
 - Confirmed latest Slither temp output is identical to `slither-report.latest.json` (no report refresh required).
 - Re-verified ignored Slither findings with `--show-ignored-findings`; `src/` still shows accepted/known ignored entries (`divide-before-multiply`, `unimplemented-functions`, `cyclomatic-complexity`) and visible `pragma`.
 - Verified GitHub Actions CI success for commit `a132ca6` (`run #22080957517`).
+- Verified GitHub Actions CI success for commit `e242817` (`run #22081734924`).
 - Committed and pushed to GitHub:
+  - `e242817` `docs: refresh 2026-02-17 validation baseline`
   - `a132ca6` `docs: clarify slither triage scope and verification`
   - `efbcf53` `docs: record 2026-02-16 validation baseline refresh`
   - `0322ca5` `docs: update handover with latest ci success`
@@ -61,6 +63,7 @@
   - `51ed358` `docs: refresh handover notes after src triage`
 
 ## Recent Commits
+- `e242817` docs: refresh 2026-02-17 validation baseline
 - `a132ca6` docs: clarify slither triage scope and verification
 - `efbcf53` docs: record 2026-02-16 validation baseline refresh
 - `0322ca5` docs: update handover with latest ci success
@@ -111,9 +114,9 @@
   - `forge test`
   - `forge snapshot --check .gas-snapshot`
 - Latest verified run:
-  - Commit: `a132ca6`
+  - Commit: `e242817`
   - Workflow result: `success`
-  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22080957517`
+  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22081734924`
 - Previous run note:
   - `22043283077` (`d48f838`) failed at `Enforce Gas Snapshot Baseline`.
   - Fixed by updating `.gas-snapshot` in `08177e1`.

@@ -233,3 +233,5 @@ Before starting the next development cycle, we re-ran the full local validation 
   - `forge snapshot --check .gas-snapshot`: pass
   - `slither . --json slither-report.tmp.json`: `src/` findings = `Informational: 1` (`pragma`)
   - `slither . --show-ignored-findings --json slither-report.show-ignored.tmp.json`: confirmed ignored `src/` findings still include accepted/known items (`divide-before-multiply`, `unimplemented-functions`, `cyclomatic-complexity`) plus visible `pragma`
+- CI verified:
+  - `e242817` run `22081734924`: `success`
