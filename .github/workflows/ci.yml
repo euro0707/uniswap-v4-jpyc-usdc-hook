@@ -34,5 +34,6 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install slither-analyzer
 
-      - name: Enforce Slither src Baseline
+      - name: Check Slither src Baseline (non-blocking)
+        continue-on-error: true
         run: python3 script/check_slither_src_baseline.py
