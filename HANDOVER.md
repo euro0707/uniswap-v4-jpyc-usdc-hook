@@ -1,11 +1,11 @@
 # Handover Notes
 
 ## Snapshot
-- Date: 2026-02-16
+- Date: 2026-02-17
 - Repo: `uniswap-v4-dynamic-fee-hook`
 - Branch: `master`
-- Remote state: `origin/master` is at `98a0660`
-- Working tree status at handover: clean after 2026-02-16 local validation rerun
+- Remote state: `origin/master` is at `a132ca6`
+- Working tree status at handover: clean after 2026-02-17 local validation rerun
 
 ## What Was Completed
 - Added function-scoped Slither triage for intentional legacy rounding in `_getFeeBasedOnVolatility` (`divide-before-multiply`).
@@ -38,7 +38,14 @@
 - Confirmed no code/config changes were required after today's validation rerun.
 - Confirmed triage DB suppressions remain effective for `src/` (`divide-before-multiply` / `unimplemented-functions` did not reappear).
 - Verified GitHub Actions CI success for commit `98a0660` (`run #22077060054`).
+- Re-ran local validation baseline on 2026-02-17 (`forge test --gas-report`, `forge snapshot`, `forge snapshot --check`, `slither` temp-output flow).
+- Confirmed latest Slither temp output is identical to `slither-report.latest.json` (no report refresh required).
+- Re-verified ignored Slither findings with `--show-ignored-findings`; `src/` still shows accepted/known ignored entries (`divide-before-multiply`, `unimplemented-functions`, `cyclomatic-complexity`) and visible `pragma`.
+- Verified GitHub Actions CI success for commit `a132ca6` (`run #22080957517`).
 - Committed and pushed to GitHub:
+  - `a132ca6` `docs: clarify slither triage scope and verification`
+  - `efbcf53` `docs: record 2026-02-16 validation baseline refresh`
+  - `0322ca5` `docs: update handover with latest ci success`
   - `98a0660` `docs: refresh handover after 2026-02-16 validation rerun`
   - `08177e1` `chore: refresh gas snapshot baseline`
   - `d48f838` `chore: refresh slither triage id`
@@ -54,6 +61,9 @@
   - `51ed358` `docs: refresh handover notes after src triage`
 
 ## Recent Commits
+- `a132ca6` docs: clarify slither triage scope and verification
+- `efbcf53` docs: record 2026-02-16 validation baseline refresh
+- `0322ca5` docs: update handover with latest ci success
 - `98a0660` docs: refresh handover after 2026-02-16 validation rerun
 - `6df5873` docs: refresh handover after triage and ci fix
 - `08177e1` chore: refresh gas snapshot baseline
@@ -101,16 +111,17 @@
   - `forge test`
   - `forge snapshot --check .gas-snapshot`
 - Latest verified run:
-  - Commit: `98a06607d8daa93ef425891ee7f2de607a731dda`
+  - Commit: `a132ca6`
   - Workflow result: `success`
-  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22077060054`
+  - Run URL: `https://github.com/euro0707/uniswap-v4-jpyc-usdc-hook/actions/runs/22080957517`
 - Previous run note:
   - `22043283077` (`d48f838`) failed at `Enforce Gas Snapshot Baseline`.
   - Fixed by updating `.gas-snapshot` in `08177e1`.
 
 ### Slither rerun
 - Command run: `slither . --json slither-report.tmp.json`
-- Report refreshed to: `slither-report.latest.json` (temporary JSON output copied into latest report)
+- Ignored-findings verification: `slither . --show-ignored-findings --json slither-report.show-ignored.tmp.json`
+- Reference report file: `slither-report.latest.json` (already up to date; temp output matched)
 - Current `src/` findings summary:
   - `Medium: 0`
   - `Low: 0`
@@ -119,8 +130,10 @@
   - `divide-before-multiply` in `_getFeeBasedOnVolatility` is now triaged via `config/slither.db.json` (detector remains enabled).
   - `unimplemented-functions` (BaseHook override false positive) is triaged via `config/slither.db.json`.
   - Remaining `src/` informational check is `pragma` (dependency version mix).
-- Latest local rerun (2026-02-16):
+- Latest local rerun (2026-02-17):
   - Slither findings for `src/`: `Informational: 1` (`pragma`)
+  - `slither-report.tmp.json` output matched `slither-report.latest.json` content (no copy needed)
+  - `--show-ignored-findings` confirms triage/ignored set in `src/`: `divide-before-multiply`, `unimplemented-functions`, `cyclomatic-complexity`, plus visible `pragma`
   - This environment requires Foundry on `PATH` for Slither (`forge` invocation by crytic-compile).
   - Slither exits non-zero when findings exist; keep using temporary JSON output and copy to `slither-report.latest.json`.
 

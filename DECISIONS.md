@@ -208,3 +208,28 @@ After documenting the 2026-02-16 validation rerun, we rechecked that:
 - CI verified:
   - `98a0660` run `22077060054`: `success`
   - `0322ca5` run `22077143825`: `success`
+
+## 2026-02-17 - Validation Baseline Recheck (No Drift)
+
+### Background
+Before starting the next development cycle, we re-ran the full local validation set to confirm there was no drift from the 2026-02-16 baseline.
+
+### Decision
+- Keep runtime logic and analysis config unchanged in this step.
+- Keep Slither triage strategy as-is:
+  - `timestamp` remains detector-excluded in `slither.config.json`.
+  - Accepted findings remain tracked by ID in `config/slither.db.json` (`divide-before-multiply`, `unimplemented-functions`).
+- Keep `slither-report.latest.json` unchanged because fresh temp output matched current latest report content.
+
+### Impact
+- No runtime behavior change.
+- No config or triage policy change.
+- Baseline remains stable with `src/` showing only dependency-driven `pragma` in standard Slither output.
+
+### Validation
+- Local rerun on 2026-02-17:
+  - `forge test --gas-report`: `57 passed, 0 failed, 0 skipped`
+  - `forge snapshot`: `57 passed, 0 failed, 0 skipped`
+  - `forge snapshot --check .gas-snapshot`: pass
+  - `slither . --json slither-report.tmp.json`: `src/` findings = `Informational: 1` (`pragma`)
+  - `slither . --show-ignored-findings --json slither-report.show-ignored.tmp.json`: confirmed ignored `src/` findings still include accepted/known items (`divide-before-multiply`, `unimplemented-functions`, `cyclomatic-complexity`) plus visible `pragma`
