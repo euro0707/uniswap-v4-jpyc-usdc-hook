@@ -55,7 +55,10 @@ def src_check_counts(report: dict) -> dict[str, int]:
         for element in elements:
             source_mapping = element.get("source_mapping") or {}
             relative = source_mapping.get("filename_relative") or ""
-            if relative.startswith("src/"):
+            normalized = relative.replace("\\", "/")
+            if normalized.startswith("./"):
+                normalized = normalized[2:]
+            if normalized.startswith("src/"):
                 has_src = True
                 break
         if not has_src:
