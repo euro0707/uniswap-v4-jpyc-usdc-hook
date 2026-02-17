@@ -235,3 +235,25 @@ Before starting the next development cycle, we re-ran the full local validation 
   - `slither . --show-ignored-findings --json slither-report.show-ignored.tmp.json`: confirmed ignored `src/` findings still include accepted/known items (`divide-before-multiply`, `unimplemented-functions`, `cyclomatic-complexity`) plus visible `pragma`
 - CI verified:
   - `e242817` run `22081734924`: `success`
+
+## 2026-02-17 - Keep Slither CI Guardrails as Permanent Operations
+
+### Background
+During 2026-02-17 CI stabilization, Slither baseline checks failed only on CI Linux while local checks passed, and direct log download was restricted in this environment.
+We needed deterministic execution and actionable failure telemetry from check annotations.
+
+### Decision
+- Keep explicit Slither invocation options in `script/check_slither_src_baseline.py`:
+  - `--config-file slither.config.json`
+  - `--triage-database config/slither.db.json`
+- Keep CI annotation output (`::error`) in `.github/workflows/ci.yml` so failure reasons are visible without full logs.
+- Keep mismatch diagnostics that include `src/` finding IDs in `script/check_slither_src_baseline.py` for fast triage-ID drift analysis.
+
+### Impact
+- No runtime behavior change.
+- Faster root-cause identification when Slither baseline drifts in CI.
+- Lower operational risk from environment-specific triage-ID differences.
+
+### Validation
+- CI after applying the guardrails and Linux triage ID update:
+  - `055da51` run `22085557747`: `success`
