@@ -49,6 +49,15 @@ forge test
 forge script script/DeployHook.s.sol:DeployHook --rpc-url $POLYGON_RPC_URL --broadcast
 ```
 
+### 検証ベースライン一括実行（PowerShell）
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\script\validate-baseline.ps1
+
+# slither-report.latest.json も更新したい場合
+powershell -NoProfile -ExecutionPolicy Bypass -File .\script\validate-baseline.ps1 -UpdateLatest
+```
+
 ## 📖 技術詳細
 
 ### アーキテクチャ
