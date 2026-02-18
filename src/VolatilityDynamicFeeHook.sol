@@ -247,8 +247,11 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             ObservationLibrary.push(obs, block.timestamp, sqrtPriceX96);
             emit ObservationRecorded(poolId, block.timestamp, sqrtPriceX96, obs.count);
             // ウォームアップ期間を開始（リセット後の手数料操作を防止）
-            warmupUntil[poolId] = block.timestamp + WARMUP_DURATION;
-            emit WarmupPeriodStarted(poolId, warmupUntil[poolId], "ring_reset");
+            // M-2: _beforeSwap でまだ設定されていない場合のみ設定（二重イベント発行防止）
+            if (warmupUntil[poolId] == 0) {
+                warmupUntil[poolId] = block.timestamp + WARMUP_DURATION;
+                emit WarmupPeriodStarted(poolId, warmupUntil[poolId], "ring_reset");
+            }
             return (BaseHook.afterSwap.selector, 0);
         }
 
@@ -474,10 +477,10 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     }
 
     function _getCurrentSqrtPriceX96(PoolId poolId) internal view returns (uint160 sqrtPriceX96) {
-        // pools[poolId] slot key in PoolManager storage.
-        bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(poolId), StateLibrary.POOLS_SLOT));
-        bytes32 data = poolManager.extsload(stateSlot);
-        sqrtPriceX96 = uint160(uint256(data));
+        // H-1 fix: Use StateLibrary.getSlot0() instead of raw extsload()
+        // This avoids direct dependency on PoolManager's internal storage layout,
+        // making the hook resilient to future v4-core upgrades.
+        (sqrtPriceX96, , , ) = StateLibrary.getSlot0(poolManager, poolId);
     }
 
     /// @notice 現在の手数料を取得（外部から確認用）
