@@ -65,7 +65,7 @@ contract SecurityTest is Test {
     event WarmupPeriodStarted(
         PoolId indexed poolId,
         uint256 until,
-        string reason
+        bytes32 reason
     );
 
     event WarmupPeriodEnded(
@@ -651,7 +651,7 @@ contract SecurityTest is Test {
 
         // Expect WarmupPeriodStarted event
         vm.expectEmit(true, false, false, true, address(hook));
-        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes, "ring_reset");
+        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes, bytes32("ring_reset"));
 
         vm.prank(address(manager));
         hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
@@ -809,7 +809,7 @@ contract SecurityTest is Test {
 
         // BEFORE any afterSwap, call beforeSwap - it should detect staleness and use BASE_FEE
         vm.expectEmit(true, false, false, true, address(hook));
-        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes, "staleness");
+        emit WarmupPeriodStarted(key.toId(), block.timestamp + 30 minutes, bytes32("staleness"));
 
         vm.expectEmit(true, false, false, true, address(hook));
         emit DynamicFeeCalculated(key.toId(), 0, 300, 6, basePrice + uint160((basePrice * 5 * 2) / 100));

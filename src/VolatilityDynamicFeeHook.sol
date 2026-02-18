@@ -101,7 +101,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     event WarmupPeriodStarted(
         PoolId indexed poolId,
         uint256 until,
-        string reason
+        bytes32 reason
     );
 
     event WarmupPeriodEnded(

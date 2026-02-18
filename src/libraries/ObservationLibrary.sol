@@ -118,7 +118,8 @@ library ObservationLibrary {
 
         // Track unique blocks using a simple linear scan with comparison
         // Note: We can't use mapping in memory, so we track last seen blocks
-        uint256 maxSeen = checkCount < 20 ? checkCount : 20;
+        // L-2 fix: tie maxSeen to minBlocks so future changes to minBlocks remain safe
+        uint256 maxSeen = minBlocks * 2 + 1;
         uint256[] memory seenBlocks = new uint256[](maxSeen);
         uint256 seenCount = 0;
 
