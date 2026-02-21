@@ -16,7 +16,7 @@ Last updated: 2026-02-21
   - Verified by full script execution (all tests passed).
 
 ## Task 2 (P1): Align MCP `inputSchema` and runtime validation
-- Status: `TODO`
+- Status: `DONE`
 - Problem:
   - `final_block_pct` boundary behavior differs between schema and Pydantic.
   - `alpha` minimum behavior differs between schema and Pydantic.
@@ -25,6 +25,13 @@ Last updated: 2026-02-21
 - Acceptance:
   - Schema and runtime boundaries are exactly aligned.
   - Boundary inputs are validated with small reproducible checks.
+- Result:
+  - Updated schema to use `exclusiveMinimum`/`exclusiveMaximum` for `final_block_pct` and `alpha`.
+  - Updated descriptions to match open-interval behavior.
+  - Verified boundary behavior with a reproducible Python check:
+    - `final_block_pct=0.1` rejected.
+    - `alpha=0` rejected.
+    - positive `alpha` accepted.
 
 ## Task 3 (P2): Make npm version check semver-aware in `prepare.cjs`
 - Status: `TODO`
