@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
@@ -13,6 +14,7 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title SwapHelper
 /// @notice Helper contract to execute swaps on Uniswap V4
@@ -86,9 +88,15 @@ contract SwapHelper is IUnlockCallback {
     }
 }
 
+interface IHookCircuitBreakerView {
+    function isCircuitBreakerTriggered(bytes32 poolId) external view returns (bool);
+}
+
 /// @title SwapSepolia
 /// @notice Execute test swaps on Sepolia to verify dynamic fee hook
 contract SwapSepolia is Script {
+    using PoolIdLibrary for PoolKey;
+
     // Sepolia Uniswap V4
     address constant POOL_MANAGER = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
 
@@ -134,16 +142,20 @@ contract SwapSepolia is Script {
             hooks: IHooks(hookAddr)
         });
 
+        // Build amounts from actual token decimals to avoid precision mismatch after address sorting
+        uint8 decimals0 = IERC20Metadata(currency0).decimals();
+        uint8 decimals1 = IERC20Metadata(currency1).decimals();
+
         // Swap parameters
         // Swap 100 units of currency0 for currency1 (exact input)
-        // currency0 = JPYC (18 decimals), currency1 = USDC (6 decimals)
-        int256 amountIn = -int256(100 * 10**18); // Negative = exact input
+        int256 amountIn = -int256(100 * 10**decimals0); // Negative = exact input
         bool zeroForOne = true; // Swap currency0 -> currency1
 
         console.log("");
         console.log("=== Swap Parameters ===");
         console.log("Direction: currency0 -> currency1 (zeroForOne)");
-        console.log("Amount In (JPYC):", uint256(-amountIn));
+        console.log("currency0 decimals:", decimals0);
+        console.log("Amount In (currency0):", uint256(-amountIn));
 
         // Execute swap
         BalanceDelta delta = swapHelper.swap(poolKey, zeroForOne, amountIn, "");
@@ -157,18 +169,28 @@ contract SwapSepolia is Script {
         console.log("");
         console.log("=== Second Swap (Reverse Direction) ===");
 
-        int256 amountIn2 = -int256(10 * 10**6); // 10 USDC exact input
+        int256 amountIn2 = -int256(10 * 10**decimals1); // 10 units of currency1 exact input
         bool zeroForOne2 = false; // Swap currency1 -> currency0
 
         console.log("Direction: currency1 -> currency0 (oneForZero)");
-        console.log("Amount In (USDC):", uint256(-amountIn2));
+        console.log("currency1 decimals:", decimals1);
+        console.log("Amount In (currency1):", uint256(-amountIn2));
 
-        BalanceDelta delta2 = swapHelper.swap(poolKey, zeroForOne2, amountIn2, "");
+        bool isCbTriggered =
+            IHookCircuitBreakerView(hookAddr).isCircuitBreakerTriggered(PoolId.unwrap(poolKey.toId()));
 
-        console.log("");
-        console.log("=== Second Swap Result ===");
-        console.log("Delta amount0:", delta2.amount0());
-        console.log("Delta amount1:", delta2.amount1());
+        if (isCbTriggered) {
+            console.log("");
+            console.log("=== Second Swap Result ===");
+            console.log("Second swap skipped because circuit breaker is active.");
+        } else {
+            BalanceDelta delta2 = swapHelper.swap(poolKey, zeroForOne2, amountIn2, "");
+
+            console.log("");
+            console.log("=== Second Swap Result ===");
+            console.log("Delta amount0:", delta2.amount0());
+            console.log("Delta amount1:", delta2.amount1());
+        }
 
         console.log("");
         console.log("=== Swaps Completed Successfully! ===");
