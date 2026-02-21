@@ -215,6 +215,11 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     }
 
     /// @notice スワップ後の処理：価格履歴を更新
+    /// @dev `whenNotPaused` は付与しない（設計上不要）。
+    ///      Uniswap v4 Core のコールフロー上、`_beforeSwap` が同一 tx で必ず先行して実行され、
+    ///      pause 中のスワップはそこで revert されるため、本関数が pause 中に
+    ///      呼ばれることはない。`_afterSwap` 内で revert すると PoolManager 全体が
+    ///      巻き戻るため、二重チェックは DoS リスクを高めるだけで有害。
     function _afterSwap(
         address,
         PoolKey calldata key,
@@ -240,6 +245,12 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         // Staleness チェック: 長期無取引後のリカバリ
         // 全観測が STALENESS_THRESHOLD (30分) より古い場合、リングをリセット
         if (ObservationLibrary.isStale(obs, STALENESS_THRESHOLD)) {
+            // stale 状態でも、直近観測比で極端な価格変動は即時拒否する
+            // これにより「長期無取引後の初回スワップ」での価格急変バイパスを防止
+            if (_applyPriceChangeProtection(poolId, obs, sqrtPriceX96)) {
+                return (BaseHook.afterSwap.selector, 0);
+            }
+
             uint256 oldCount = obs.count;
             ObservationLibrary.reset(obs);
             emit ObservationRingReset(poolId, oldCount, STALENESS_THRESHOLD);
@@ -266,54 +277,8 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         }
 
         // セキュリティチェック2: 新しい価格の変動をチェック（観測追加前）
-        if (obs.count > 0) {
-            uint256 lastIdx = obs.index == 0 ? 99 : obs.index - 1;
-            uint160 lastPrice = obs.data[lastIdx].sqrtPriceX96;
-
-            if (lastPrice > 0) {
-                // 新しい価格と最後の価格の変動率を計算
-                // FullMath.mulDiv を使ってオーバーフロー安全に計算
-                uint256 currSqrt = uint256(sqrtPriceX96);
-                uint256 prevSqrt = uint256(lastPrice);
-
-                // price = sqrtPrice^2 なので、変動率 = |currPrice - prevPrice| / prevPrice
-                //                                    = |currSqrt^2 - prevSqrt^2| / prevSqrt^2
-                // 因数分解: = |(currSqrt + prevSqrt)(currSqrt - prevSqrt)| / prevSqrt^2
-                // 段階的に除算: = ((currSqrt + prevSqrt) * diff / prevSqrt) * 10000 / prevSqrt
-                // 両方の除算で切り上げ (mulDivRoundingUp) で保守的に評価
-                uint256 priceChange;
-                if (currSqrt > prevSqrt) {
-                    uint256 diff = currSqrt - prevSqrt;
-                    // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
-                    uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
-                    // temp * 10000 / prevSqrt (通常除算で過大評価を防ぐ)
-                    priceChange = FullMath.mulDiv(temp, 10000, prevSqrt);
-                } else {
-                    uint256 diff = prevSqrt - currSqrt;
-                    // (currSqrt + prevSqrt) * diff / prevSqrt (切り上げ)
-                    uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
-                    // temp * 10000 / prevSqrt (通常除算で過大評価を防ぐ)
-                    priceChange = FullMath.mulDiv(temp, 10000, prevSqrt);
-                }
-
-                // 50%以上の変動を即座に拒否（最優先）
-                if (priceChange > MAX_PRICE_CHANGE_BPS) {
-                    emit PriceManipulationAttempt(poolId, priceChange, obs.count);
-                    revert PriceManipulationDetected();
-                }
-
-                // 10%以上50%未満の変動でサーキットブレーカー
-                if (priceChange > CIRCUIT_BREAKER_THRESHOLD && !circuitBreakerTriggered[poolId]) {
-                    circuitBreakerTriggered[poolId] = true;
-                    circuitBreakerActivatedAt[poolId] = block.timestamp;
-                    // Get previous price from last observation
-                    uint256 prevIdx = obs.index == 0 ? 99 : obs.index - 1;
-                    uint160 previousPrice = obs.data[prevIdx].sqrtPriceX96;
-                    emit CircuitBreakerActivated(poolId, priceChange, sqrtPriceX96, previousPrice, CIRCUIT_BREAKER_THRESHOLD);
-                    // 異常価格（10-50%変動）は観測履歴に記録しない（ボラティリティ計算の汚染を防ぐ）
-                    return (BaseHook.afterSwap.selector, 0);
-                }
-            }
+        if (_applyPriceChangeProtection(poolId, obs, sqrtPriceX96)) {
+            return (BaseHook.afterSwap.selector, 0);
         }
 
         // セキュリティチェックに合格したら観測を追加
@@ -396,19 +361,88 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
             uint256 weight = recencyWeight * timeWeight;
             uint256 variation = _variationBps(current.sqrtPriceX96, previous.sqrtPriceX96);
 
-            // 時間重み付き変動を加算（オーバーフローチェック付き）
-            uint256 weightedTerm = variation * weight;
-            uint256 newWeightedVariation = weightedVariation + weightedTerm;
-            if (newWeightedVariation < weightedVariation) {
-                // オーバーフロー検出 → 最大値でキャップして終了
-                weightedVariation = type(uint256).max / 2; // 除算を考慮して半分に
-                totalWeight = totalWeight > 0 ? totalWeight : 1; // ゼロ除算防止
+            // Solidity 0.8 の checked arithmetic で先に revert しないよう、
+            // 乗算・加算の前に overflow 可能性を判定する
+            if (variation > 0 && weight > type(uint256).max / variation) {
+                // 安全側へ倒す: ボラティリティ上限相当の値を返す
+                weightedVariation = type(uint256).max;
+                totalWeight = 1;
                 break;
             }
 
-            weightedVariation = newWeightedVariation;
+            uint256 weightedTerm = variation * weight;
+            if (weightedVariation > type(uint256).max - weightedTerm) {
+                weightedVariation = type(uint256).max;
+                totalWeight = 1;
+                break;
+            }
+
+            if (totalWeight > type(uint256).max - weight) {
+                weightedVariation = type(uint256).max;
+                totalWeight = 1;
+                break;
+            }
+
+            weightedVariation += weightedTerm;
             totalWeight += weight;
             currentIndex = prevIndex;
+        }
+    }
+
+    /// @notice 新しい観測価格の急変チェックを実施し、必要に応じてサーキットブレーカーを発動
+    /// @return shouldSkipObservation true の場合は観測履歴への追加をスキップする
+    function _applyPriceChangeProtection(
+        PoolId poolId,
+        ObservationLibrary.RingBuffer storage obs,
+        uint160 currentSqrtPriceX96
+    ) internal returns (bool shouldSkipObservation) {
+        if (obs.count == 0) {
+            return false;
+        }
+
+        uint256 lastIdx = _previousRingIndex(obs.index);
+        uint160 lastPrice = obs.data[lastIdx].sqrtPriceX96;
+        if (lastPrice == 0) {
+            return false;
+        }
+
+        uint256 priceChange = _variationBpsRoundedUp(currentSqrtPriceX96, lastPrice);
+
+        // 50%以上の変動を即座に拒否（最優先）
+        if (priceChange > MAX_PRICE_CHANGE_BPS) {
+            emit PriceManipulationAttempt(poolId, priceChange, obs.count);
+            revert PriceManipulationDetected();
+        }
+
+        // 10%以上50%未満の変動でサーキットブレーカー
+        if (priceChange > CIRCUIT_BREAKER_THRESHOLD && !circuitBreakerTriggered[poolId]) {
+            circuitBreakerTriggered[poolId] = true;
+            circuitBreakerActivatedAt[poolId] = block.timestamp;
+            emit CircuitBreakerActivated(poolId, priceChange, currentSqrtPriceX96, lastPrice, CIRCUIT_BREAKER_THRESHOLD);
+            // 異常価格（10-50%変動）は観測履歴に記録しない（ボラティリティ計算の汚染を防ぐ）
+            return true;
+        }
+
+        return false;
+    }
+
+    /// @notice 実価格ベースの変動率を bps で計算（過小評価を避けるため一部切り上げ）
+    function _variationBpsRoundedUp(uint160 currentSqrtPriceX96, uint160 previousSqrtPriceX96)
+        internal
+        pure
+        returns (uint256 variation)
+    {
+        uint256 currSqrt = uint256(currentSqrtPriceX96);
+        uint256 prevSqrt = uint256(previousSqrtPriceX96);
+
+        if (currSqrt > prevSqrt) {
+            uint256 diff = currSqrt - prevSqrt;
+            uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
+            variation = FullMath.mulDiv(temp, 10000, prevSqrt);
+        } else {
+            uint256 diff = prevSqrt - currSqrt;
+            uint256 temp = FullMath.mulDivRoundingUp(currSqrt + prevSqrt, diff, prevSqrt);
+            variation = FullMath.mulDiv(temp, 10000, prevSqrt);
         }
     }
 
@@ -485,9 +519,30 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
 
     /// @notice 現在の手数料を取得（外部から確認用）
     /// @param key プールキー
-    /// @return 現在の動的手数料
+    /// @return 現在の適用見込み手数料
     function getCurrentFee(PoolKey calldata key) external view returns (uint24) {
-        uint256 volatility = _calculateVolatility(key.toId());
+        PoolId poolId = key.toId();
+        ObservationLibrary.RingBuffer storage obs = observations[poolId];
+
+        // beforeSwap と同等に、CB有効中はスワップ不可
+        if (
+            circuitBreakerTriggered[poolId]
+                && block.timestamp < circuitBreakerActivatedAt[poolId] + CIRCUIT_BREAKER_COOLDOWN
+        ) {
+            revert CircuitBreakerTriggered();
+        }
+
+        // beforeSwap と同等に、ウォームアップ中は BASE_FEE を返す
+        if (warmupUntil[poolId] > block.timestamp) {
+            return BASE_FEE;
+        }
+
+        // beforeSwap がまだ呼ばれていない stale 状態でも、初回スワップ見込みとして BASE_FEE を返す
+        if (warmupUntil[poolId] == 0 && obs.count > 0 && ObservationLibrary.isStale(obs, STALENESS_THRESHOLD)) {
+            return BASE_FEE;
+        }
+
+        uint256 volatility = _calculateVolatility(poolId);
         return _getFeeBasedOnVolatility(volatility);
     }
 
