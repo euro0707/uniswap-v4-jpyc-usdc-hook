@@ -523,6 +523,7 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
     function getCurrentFee(PoolKey calldata key) external view returns (uint24) {
         PoolId poolId = key.toId();
         ObservationLibrary.RingBuffer storage obs = observations[poolId];
+        uint256 warmupEnd = warmupUntil[poolId];
 
         // beforeSwap と同等に、CB有効中はスワップ不可
         if (
@@ -533,12 +534,13 @@ contract VolatilityDynamicFeeHook is BaseHook, Ownable, Pausable {
         }
 
         // beforeSwap と同等に、ウォームアップ中は BASE_FEE を返す
-        if (warmupUntil[poolId] > block.timestamp) {
+        if (warmupEnd > block.timestamp) {
             return BASE_FEE;
         }
 
-        // beforeSwap がまだ呼ばれていない stale 状態でも、初回スワップ見込みとして BASE_FEE を返す
-        if (warmupUntil[poolId] == 0 && obs.count > 0 && ObservationLibrary.isStale(obs, STALENESS_THRESHOLD)) {
+        // beforeSwap がまだ呼ばれていない場合、期限切れ warmup が残っていても
+        // stale であれば次の beforeSwap では warmup 再開 -> BASE_FEE となるため見込みも BASE_FEE に合わせる
+        if (warmupEnd <= block.timestamp && obs.count > 0 && ObservationLibrary.isStale(obs, STALENESS_THRESHOLD)) {
             return BASE_FEE;
         }
 

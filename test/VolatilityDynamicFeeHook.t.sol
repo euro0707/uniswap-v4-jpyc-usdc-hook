@@ -467,6 +467,68 @@ contract VolatilityDynamicFeeHookTest is Test {
         assertLe(feeAfterWarmup, 5000, "Fee after warmup should not exceed MAX_FEE");
     }
 
+    /// @notice warmup期限切れ後に stale になった場合でも getCurrentFee は BASE_FEE 見込みを返す
+    function test_getCurrentFee_staleAfterWarmupExpiry_returnsBaseFeeEstimate() public {
+        PoolKey memory key =
+            PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.roll(1);
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+        uint160 lastPrice = basePrice;
+        uint256 nextBlock = 2;
+
+        // Build non-trivial volatility history (< circuit-breaker threshold per step)
+        for (uint256 i = 0; i < 3; i++) {
+            skip(10 minutes);
+            vm.roll(nextBlock);
+            nextBlock++;
+            lastPrice = lastPrice + uint160((lastPrice * 4) / 100); // +4% sqrtPrice per step
+            bytes32 stepSlot = encodeSlot0(lastPrice, int24(0), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(stepSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // Trigger stale reset and warmup start
+        skip(31 minutes);
+        vm.roll(nextBlock);
+        nextBlock++;
+        lastPrice = lastPrice + uint160((lastPrice * 2) / 100);
+        bytes32 resetSlot = encodeSlot0(lastPrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(resetSlot);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Add observations during warmup
+        for (uint256 i = 0; i < 2; i++) {
+            skip(10 minutes);
+            vm.roll(nextBlock);
+            nextBlock++;
+            lastPrice = lastPrice + uint160((lastPrice * 2) / 100);
+            bytes32 warmupSlot = encodeSlot0(lastPrice, int24(0), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(warmupSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        // warmup expiry point: dynamic fee can be > BASE_FEE while data is still fresh
+        skip(11 minutes); // from warmup start +31 minutes
+        uint24 feeAfterWarmup = hook.getCurrentFee(key);
+        assertGt(feeAfterWarmup, 300, "Fee should be dynamic right after warmup expiry");
+
+        // Later, all observations become stale again. Estimate should match beforeSwap behavior (BASE_FEE).
+        skip(50 minutes);
+        uint24 staleEstimate = hook.getCurrentFee(key);
+        assertEq(staleEstimate, 300, "Stale post-warmup estimate should return BASE_FEE");
+    }
+
     /// @notice Test circuit breaker activation on large price spike
     function test_circuitBreaker_priceSpike() public {
         PoolKey memory key = PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
