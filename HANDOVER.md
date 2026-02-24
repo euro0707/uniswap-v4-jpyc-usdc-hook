@@ -1,6 +1,6 @@
 # Handover Notes
 
-> Latest handover (2026-02-17): `HANDOVER_ANTIGRAVITY_2026-02-17.md`
+> Latest handover (2026-02-20): `HANDOVER_CODEX_2026-02-20.md`
 
 ## Snapshot
 - Date: 2026-02-17

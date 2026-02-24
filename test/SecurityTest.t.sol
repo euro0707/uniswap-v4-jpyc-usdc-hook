@@ -506,6 +506,7 @@ contract SecurityTest is Test {
         hook.afterInitialize(address(this), key, basePrice, int24(0));
 
         SwapParams memory params = SwapParams(true, 1000, 0);
+        uint160 lastObservedPrice = basePrice;
 
         // 正常な観測を構築（10分ごとに10回）
         for (uint256 i = 1; i <= 10; i++) {
@@ -516,6 +517,7 @@ contract SecurityTest is Test {
             manager.setDefaultSlotData(newSlot);
             vm.prank(address(manager));
             hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+            lastObservedPrice = newPrice;
         }
 
         // 35分間（STALENESS_THRESHOLD=30分を超える）取引なし
@@ -523,7 +525,8 @@ contract SecurityTest is Test {
         vm.roll(20);
 
         // 新しい価格で取引を実行（staleness回復のはず）
-        uint160 recoveryPrice = basePrice + uint160((basePrice * 5) / 100);
+        // stale 後でも価格急変チェックは有効なため、直近価格との差分は閾値内に収める
+        uint160 recoveryPrice = lastObservedPrice - uint160((lastObservedPrice * 4) / 100);
         bytes32 recoverySlot = encodeSlot0(recoveryPrice, int24(50), uint24(0), uint24(3000));
         manager.setDefaultSlotData(recoverySlot);
 
@@ -538,6 +541,58 @@ contract SecurityTest is Test {
         // staleness回復が機能することを確認
         vm.prank(address(manager));
         hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+    }
+
+    /// @notice stale 後の初回スワップでも極端な価格変動は拒否されることを検証
+    function test_security_staleFirstSwapRejectsExtremePriceChange() public {
+        PoolKey memory key = PoolKey(
+            Currency.wrap(address(0x1)),
+            Currency.wrap(address(0x2)),
+            uint24(0x800000),
+            int24(1),
+            IHooks(address(0))
+        );
+        uint160 basePrice = uint160(1 << 96);
+
+        bytes32 slot = encodeSlot0(basePrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, basePrice, int24(0));
+
+        SwapParams memory params = SwapParams(true, 1000, 0);
+
+        // Build normal observations across multiple blocks
+        for (uint256 i = 1; i <= 5; i++) {
+            skip(10 minutes);
+            vm.roll(i + 1);
+            uint160 newPrice = basePrice + uint160((basePrice * i * 2) / 100);
+            bytes32 newSlot = encodeSlot0(newPrice, int24(int256(i * 5)), uint24(0), uint24(3000));
+            manager.setDefaultSlotData(newSlot);
+            vm.prank(address(manager));
+            hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+        }
+
+        uint160[] memory beforePrices = hook.getPriceHistory(key);
+        assertEq(beforePrices.length, 6, "Expected initial + 5 observations");
+
+        // Enter stale period
+        skip(35 minutes);
+        vm.roll(20);
+
+        // Extreme jump after staleness should still be rejected (>50%)
+        uint160 extremePrice = basePrice + uint160((basePrice * 90) / 100);
+        bytes32 extremeSlot = encodeSlot0(extremePrice, int24(200), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(extremeSlot);
+
+        vm.expectRevert(VolatilityDynamicFeeHook.PriceManipulationDetected.selector);
+        vm.prank(address(manager));
+        hook.afterSwap(address(this), key, params, BalanceDelta.wrap(0), bytes(""));
+
+        // Revert path should keep historical data and not start warmup
+        uint160[] memory afterPrices = hook.getPriceHistory(key);
+        assertEq(afterPrices.length, beforePrices.length, "History must remain unchanged on revert");
+        assertEq(hook.warmupUntil(key.toId()), 0, "Warmup should not start when stale swap reverts");
     }
 
     /// @notice サーキットブレーカー自動リセットを確認

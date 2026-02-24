@@ -11,6 +11,7 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {ObservationLibrary} from "../src/libraries/ObservationLibrary.sol";
 
 contract MockPoolManager {
     bytes32 public defaultSlotData;
@@ -33,6 +34,10 @@ contract TestHook is VolatilityDynamicFeeHook {
 
     function exposedGetFeeBasedOnVolatility(uint256 volatility) external pure returns (uint24) {
         return _getFeeBasedOnVolatility(volatility);
+    }
+
+    function exposedPushObservation(PoolId poolId, uint256 timestamp, uint160 sqrtPriceX96) external {
+        ObservationLibrary.push(observations[poolId], timestamp, sqrtPriceX96);
     }
 }
 
@@ -309,7 +314,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         // First swap: 1 hour interval, large price change
         // Codex版: 1時間間隔で観測を記録
         skip(10 minutes);
-        uint160 price1 = basePrice + uint160((basePrice * 10) / 100); // +10%
+        uint160 price1 = basePrice + uint160((basePrice * 4) / 100); // +4% (actual price change ~8.16%, below CB)
         bytes32 slot1 = encodeSlot0(price1, int24(0), uint24(0), uint24(3000));
         manager.setDefaultSlotData(slot1);
         vm.prank(address(manager));
@@ -547,6 +552,36 @@ contract VolatilityDynamicFeeHookTest is Test {
         uint24 fee = hook.getCurrentFee(key);
         assertGe(fee, 300, "Fee should be at least BASE_FEE");
         assertLe(fee, 5000, "Fee should not exceed MAX_FEE");
+    }
+
+    /// @notice weighted variation 計算がオーバーフローし得る入力でも revert せず安全側に飽和する
+    function test_boundary_weightedVariationOverflowSaturatesToMaxFee() public {
+        TestHook t = TestHook(address(hook));
+        PoolKey memory key =
+            PoolKey(Currency.wrap(address(0x1)), Currency.wrap(address(0x2)), uint24(0x800000), int24(1), IHooks(address(0)));
+
+        uint160 initialPrice = uint160(1 << 96);
+        bytes32 slot = encodeSlot0(initialPrice, int24(0), uint24(0), uint24(3000));
+        manager.setDefaultSlotData(slot);
+
+        vm.prank(address(manager));
+        hook.afterInitialize(address(this), key, initialPrice, int24(0));
+
+        PoolId poolId = key.toId();
+        uint160 low = TickMath.MIN_SQRT_PRICE + 1;
+        uint160 high = TickMath.MAX_SQRT_PRICE - 1;
+
+        // afterSwap のセキュリティ制約を介さず、極端値を直接観測リングへ投入して
+        // _accumulateWeightedVariation のオーバーフロー経路を再現する
+        for (uint256 i = 0; i < 12; i++) {
+            vm.warp(block.timestamp + 1 hours);
+            vm.roll(block.number + 1);
+            uint160 p = (i % 2 == 0) ? low : high;
+            t.exposedPushObservation(poolId, block.timestamp, p);
+        }
+
+        uint24 fee = hook.getCurrentFee(key);
+        assertEq(fee, 5000, "Overflow path should saturate to MAX_FEE");
     }
 
     /// @notice Test MIN_UPDATE_INTERVAL boundary (10 minutes)
