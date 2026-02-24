@@ -34,7 +34,7 @@ Last updated: 2026-02-21
     - positive `alpha` accepted.
 
 ## Task 3 (P2): Make npm version check semver-aware in `prepare.cjs`
-- Status: `TODO`
+- Status: `DONE`
 - Problem:
   - Range spec like `>=11.7.0` is compared by string equality, causing false warnings.
 - Files:
@@ -42,6 +42,10 @@ Last updated: 2026-02-21
 - Acceptance:
   - `engines.npm` range is evaluated correctly.
   - No warning for satisfying npm versions.
+- Result:
+  - Switched npm version check from string equality to `semver.satisfies(current, engines.npm)`.
+  - Added graceful fallback to string comparison when version/range parsing is invalid.
+  - Updated mismatch message to display `Required range` and suggest `semver.minVersion(range)` when available.
 
 ## Task 4 (P3): Define policy for `round_to_nearest` degenerate cases
 - Status: `TODO`
