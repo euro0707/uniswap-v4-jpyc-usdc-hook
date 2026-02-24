@@ -112,7 +112,7 @@ contract VolatilityDynamicFeeHookTest is Test {
         assertEq(currentFee, 300, "Fee should be BASE_FEE when volatility is 0");
     }
 
-    function test_feeCurve_rounding_regression_legacyBehavior() public {
+    function test_feeCurve_rounding_regression_legacyBehavior() public view {
         TestHook t = TestHook(address(hook));
 
         assertEq(t.exposedGetFeeBasedOnVolatility(14), 347, "v=14 should match legacy rounding");
