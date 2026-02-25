@@ -48,7 +48,7 @@ Last updated: 2026-02-21
   - Updated mismatch message to display `Required range` and suggest `semver.minVersion(range)` when available.
 
 ## Task 4 (P3): Define policy for `round_to_nearest` degenerate cases
-- Status: `TODO`
+- Status: `DONE`
 - Problem:
   - Extreme rounding can produce many zero-duration phases but still pass.
   - Behavior can diverge from documentation expectations.
@@ -59,6 +59,11 @@ Last updated: 2026-02-21
   - Explicit policy documented (allow vs reject degenerate rounding).
   - Implementation/docs updated to match policy.
   - Representative regression checks pass.
+- Result:
+  - Policy fixed as **reject**: schedules with non-positive step durations are rejected.
+  - Added explicit validation in `logic.py` to raise `ValueError` when rounded (or undersized) boundaries collapse.
+  - Updated `README.md` and `server.py` descriptions to document fail-fast behavior.
+  - Verified with `python test_logic.py` including degenerate-rounding regression checks.
 
 ## Execution order
 1. Task 1

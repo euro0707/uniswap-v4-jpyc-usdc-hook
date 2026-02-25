@@ -1,0 +1,124 @@
+﻿diff --git a/CODEX_REVIEW_REQUEST_V1.md b/CODEX_REVIEW_REQUEST_V1.md
+index 83ed9cb..ef8cc3f 100644
+--- a/CODEX_REVIEW_REQUEST_V1.md
++++ b/CODEX_REVIEW_REQUEST_V1.md
+@@ -1,27 +1,42 @@
+-# Codex 繧ｻ繧ｭ繝･繝ｪ繝・ぅ繝ｬ繝薙Η繝ｼ萓晞ｼ (v1.0)
++# Codex 繧ｻ繧ｭ繝･繝ｪ繝・ぅ繝ｬ繝薙Η繝ｼ萓晞ｼ (v1.0 - 菫ｮ豁｣蠕梧怙邨ら沿)
+ 
+ ## 繝励Ο繧ｸ繧ｧ繧ｯ繝域ｦりｦ・ 
+-**繧ｳ繝ｳ繝医Λ繧ｯ繝亥錐:** `VolatilityDynamicFeeHook`
+-**繝輔ぃ繧､繝ｫ:** `src/VolatilityDynamicFeeHook.sol`・・36陦鯉ｼ・-**Solidity:** `^0.8.24`
+-**繝輔Ξ繝ｼ繝繝ｯ繝ｼ繧ｯ:** Uniswap v4 Hook・・aseHook邯呎価・・+**繧ｳ繝ｳ繝医Λ繧ｯ繝亥錐:** `VolatilityDynamicFeeHook`  
++**繝ｪ繝昴ず繝医Μ:** `euro0707/uniswap-v4-jpyc-usdc-hook`  
++**蟇ｾ雎｡繝悶Λ繝ｳ繝・** `master`・域怙譁ｰ繧ｳ繝溘ャ繝茨ｼ・ 
++**Solidity:** `^0.8.24`  
++**繝輔Ξ繝ｼ繝繝ｯ繝ｼ繧ｯ:** Uniswap v4 Hook・・aseHook邯呎価・・ 
+ **逕ｨ騾・** JPYC/USDC 繝壹い縺ｮ繝懊Λ繝・ぅ繝ｪ繝・ぅ騾｣蜍募虚逧・焔謨ｰ譁・ 
++## 繝ｬ繝薙Η繝ｼ蟇ｾ雎｡繝輔ぃ繧､繝ｫ・亥━蜈磯・ｼ・+
++| 繝輔ぃ繧､繝ｫ | 陦梧焚 | 蠖ｹ蜑ｲ |
++|---|---|---|
++| `src/VolatilityDynamicFeeHook.sol` | ~540陦・| 繝｡繧､繝ｳ繧ｳ繝ｳ繝医Λ繧ｯ繝・|
++| `src/libraries/ObservationLibrary.sol` | 223陦・| 繝ｪ繝ｳ繧ｰ繝舌ャ繝輔ぃ繝ｻ萓｡譬ｼ隕ｳ貂ｬ |
++| `test/SecurityTest.t.sol` | 1268陦・| 繧ｻ繧ｭ繝･繝ｪ繝・ぅ繝・せ繝・|
++| `test/VolatilityDynamicFeeHookTest.t.sol` | - | 繝ｦ繝九ャ繝医ユ繧ｹ繝・|
++
+ ## 迴ｾ蝨ｨ縺ｮ蜩∬ｳｪ迥ｶ諷・ 
+ | 鬆・岼 | 迥ｶ諷・|
+ |---|---|
+-| 繝・せ繝・| 57莉ｶ蜈ｨ繝代せ・・螟ｱ謨暦ｼ・|
+-| Slither Medium | 0莉ｶ |
+-| Slither Low | 0莉ｶ |
++| 繝・せ繝・| **57莉ｶ蜈ｨ繝代せ・・xit code 0・・* |
++| Slither Medium | **0莉ｶ** |
++| Slither Low | **0莉ｶ** |
+ | Slither Informational | 1莉ｶ・・pragma` 縺ｮ縺ｿ・・|
+-| CI (GitHub Actions) | 笨・騾夐℃・医さ繝溘ャ繝・`e242817`・・|
++| CI (GitHub Actions) | 笨・騾夐℃ |
+ | 繧ｬ繧ｹ繝吶・繧ｹ繝ｩ繧､繝ｳ | `.gas-snapshot` 邂｡逅・ｸ医∩ |
+ 
+-譌｢遏･縺ｮ險ｱ螳ｹ貂医∩ Slither 讀懷・・・config/slither.db.json` 縺ｧ繝医Μ繧｢繝ｼ繧ｸ貂医∩・・
+-- `divide-before-multiply` ﾃ・2莉ｶ: `_getFeeBasedOnVolatility` 縺ｮ諢丞峙逧・↑繝ｬ繧ｬ繧ｷ繝ｼ荳ｸ繧・-- `unimplemented-functions` ﾃ・1莉ｶ: `BaseHook.getHookPermissions` 縺ｮ隱､讀懃衍
++## 螳滓命貂医∩繧ｻ繧ｭ繝･繝ｪ繝・ぅ菫ｮ豁｣・域悽繝ｬ繝薙Η繝ｼ蜑阪↓蟇ｾ蠢懈ｸ医∩・・+
++| ID | 蜀・ｮｹ | 蟇ｾ蠢・|
++|---|---|---|
++| H-1 | `extsload` 竊・`StateLibrary.getSlot0()` 縺ｫ鄂ｮ謠・| 笨・菫ｮ豁｣貂医∩ |
++| M-2 | `warmupUntil` 莠碁㍾險ｭ螳夐亟豁｢・域擅莉ｶ霑ｽ蜉・・| 笨・菫ｮ豁｣貂医∩ |
++| L-2 | `seenBlocks` 荳企剞繧・`minBlocks * 2 + 1` 縺ｫ螟画峩 | 笨・菫ｮ豁｣貂医∩ |
++| L-3 | `WarmupPeriodStarted.reason` 繧・`string` 竊・`bytes32` | 笨・菫ｮ豁｣貂医∩ |
+ 
+ ## 螳溯｣・ｸ医∩繧ｻ繧ｭ繝･繝ｪ繝・ぅ讖溯・
+ 
+@@ -32,16 +47,17 @@
+ 
+ 2. **萓｡譬ｼ謫堺ｽ懈､懃衍**
+    - `MAX_PRICE_CHANGE_BPS = 5000` (50%): 雜・℃縺ｧ蜊ｳ蠎ｧ縺ｫ `PriceManipulationDetected` revert
+-   - sqrtPriceﾂｲ 繝吶・繧ｹ縺ｮ螳滄圀縺ｮ萓｡譬ｼ螟牙虚邇・〒險育ｮ暦ｼ・ullMath.mulDiv 菴ｿ逕ｨ・・+   - sqrtPriceﾂｲ 繝吶・繧ｹ縺ｮ螳滄圀縺ｮ萓｡譬ｼ螟牙虚邇・〒險育ｮ暦ｼ・FullMath.mulDiv` 菴ｿ逕ｨ・・ 
+ 3. **繧ｵ繝ｼ繧ｭ繝・ヨ繝悶Ξ繝ｼ繧ｫ繝ｼ**
+    - `CIRCUIT_BREAKER_THRESHOLD = 1000` (10%): 逋ｺ蜍暮明蛟､
+    - `CIRCUIT_BREAKER_COOLDOWN = 1 hours`: 閾ｪ蜍輔Μ繧ｻ繝・ヨ
+    - `resetCircuitBreaker()`: Owner 縺ｫ繧医ｋ謇句虚繝ｪ繧ｻ繝・ヨ
+ 
+-4. **Staleness Recovery**
++4. **Staleness Recovery・磯聞譛溽┌蜿門ｼ募ｾ後・蝗槫ｾｩ・・*
+    - `STALENESS_THRESHOLD = 30 minutes`: 蜿､縺・ｦｳ貂ｬ繝・・繧ｿ縺ｮ讀懷・
+    - `WARMUP_DURATION = 30 minutes`: 繝ｪ繧ｻ繝・ヨ蠕後・繧ｦ繧ｩ繝ｼ繝繧｢繝・・・・ASE_FEE蝗ｺ螳夲ｼ・+   - `_beforeSwap` / `_afterSwap` 荳｡譁ｹ縺ｧ讀懷・繝ｻ菫晁ｭｷ
+ 
+ 5. **繧｢繧ｯ繧ｻ繧ｹ蛻ｶ蠕｡**
+    - OpenZeppelin `Ownable`: `resetCircuitBreaker`, `pause`, `unpause`
+@@ -52,64 +68,50 @@
+    - 莠梧ｬ｡髢｢謨ｰ繧ｫ繝ｼ繝厄ｼ井ｽ弱・繝ｩ譎らｷｩ繧・°縲・ｫ倥・繝ｩ譎よ･荳頑・・・    - 譎る俣驥阪∩莉倥″繝懊Λ繝・ぅ繝ｪ繝・ぅ險育ｮ暦ｼ域怙霑代・隕ｳ貂ｬ縺ｫ鬮倥＞驥阪∩・・ 
+-## 繝ｬ繝薙Η繝ｼ萓晞ｼ莠矩・+## Codex縺ｸ縺ｮ繝ｬ繝薙Η繝ｼ萓晞ｼ莠矩・ 
+-### 蜆ｪ蜈亥ｺｦ・夐ｫ・+### 閥 譛蜆ｪ蜈育｢ｺ隱・ 
+-1. **`_getCurrentSqrtPriceX96` 縺ｮ `extsload` 菴ｿ逕ｨ**
+-   - `StateLibrary.POOLS_SLOT` 繧剃ｽｿ縺｣縺滉ｽ弱Ξ繝吶Ν繧ｹ繝医Ξ繝ｼ繧ｸ隱ｭ縺ｿ蜿悶ｊ
+-   - Uniswap v4 縺ｮ繧｢繝・・繧ｰ繝ｬ繝ｼ繝峨〒螢翫ｌ繧九Μ繧ｹ繧ｯ縺ｯ縺ゅｋ縺具ｼ・-   - 莉｣譖ｿ謇区ｮｵ・・StateLibrary.getSlot0`・峨→縺ｮ豈碑ｼ・+1. **Uniswap v4 Hook 迚ｹ譛峨・繝ｪ繧ｹ繧ｯ**
++   - `beforeSwap` / `afterSwap` 縺ｮ蜻ｼ縺ｳ蜃ｺ縺励さ繝ｳ繝・く繧ｹ繝医〒隕玖誠縺ｨ縺励※縺・ｋ繝ｪ繧ｹ繧ｯ縺ｯ縺ゅｋ縺具ｼ・+   - `OVERRIDE_FEE_FLAG` 縺ｮ險ｭ螳壽婿豕輔・豁｣縺励＞縺具ｼ・ 
+ 2. **`_calculateVolatility` 縺ｮ繧ｪ繝ｼ繝舌・繝輔Ο繝ｼ閠先ｧ**
+    - `_accumulateWeightedVariation` 縺ｮ `recencyWeight = 2^exponent`・域怙螟ｧ `2^10 = 1024`・・-   - `variation * weight` 縺ｧ縺ｮ繧ｪ繝ｼ繝舌・繝輔Ο繝ｼ繝ｪ繧ｹ繧ｯ
++   - `variation * weight` 縺ｧ縺ｮ繧ｪ繝ｼ繝舌・繝輔Ο繝ｼ繝ｪ繧ｹ繧ｯ縺ｮ隧穂ｾ｡
+    - 繧ｪ繝ｼ繝舌・繝輔Ο繝ｼ讀懷・蠕後・ `type(uint256).max / 2` 繧ｭ繝｣繝・・縺ｯ驕ｩ蛻・°・・ 
+-3. **繧ｵ繝ｼ繧ｭ繝・ヨ繝悶Ξ繝ｼ繧ｫ繝ｼ縺ｮ閾ｪ蜍輔Μ繧ｻ繝・ヨ繝ｭ繧ｸ繝・け**
+-   - `_beforeSwap` 縺ｧ縺ｮ繝ｪ繧ｻ繝・ヨ・・circuitBreakerTriggered[poolId] = false`・・-   - 繝ｪ繧ｻ繝・ヨ逶ｴ蠕後↓蜷御ｸ繝医Λ繝ｳ繧ｶ繧ｯ繧ｷ繝ｧ繝ｳ蜀・〒繧ｹ繝ｯ繝・・縺檎ｶ夊｡後＆繧後ｋ轤ｹ縺ｯ蝠城｡後↑縺・°・・-
+-4. **`_afterSwap` 縺ｧ縺ｮ萓｡譬ｼ螟牙虚繝√ぉ繝・け縺ｮ鬆・ｺ・*
+-   - Staleness 繝ｪ繧ｻ繝・ヨ 竊・multiBlock 繝√ぉ繝・け 竊・萓｡譬ｼ螟牙虚繝√ぉ繝・け縺ｮ鬆・ｺ上・驕ｩ蛻・°・・-   - Staleness 繝ｪ繧ｻ繝・ヨ蠕後↓繧ｻ繧ｭ繝･繝ｪ繝・ぅ繝√ぉ繝・け繧偵せ繧ｭ繝・・縺励※縺・ｋ轤ｹ・域э蝗ｳ逧・ｼ・-
+-### 蜆ｪ蜈亥ｺｦ・壻ｸｭ
++3. **譛ｪ逋ｺ隕九・閼・ｼｱ諤ｧ**
++   - **ADVISORY莉･荳翫・譛ｪ逋ｺ隕玖ф蠑ｱ諤ｧ縺ｯ縺ゅｋ縺具ｼ・*
++   - MEV繝ｻ繧ｵ繝ｳ繝峨う繝・メ謾ｻ謦・∈縺ｮ閠先ｧ隧穂ｾ｡
+ 
+-5. **`getPriceHistory` 縺ｮ繧ｬ繧ｹ豸郁ｲｻ**
+-   - 譛螟ｧ100隕∫ｴ縺ｮ繝ｫ繝ｼ繝暦ｼ医が繝ｳ繝√ぉ繝ｼ繝ｳ蜻ｼ縺ｳ蜃ｺ縺励〒縺ｮ繧ｬ繧ｹ荳企剞繝ｪ繧ｹ繧ｯ・・-   - `view` 髢｢謨ｰ縺ｪ縺ｮ縺ｧ蝠城｡後↑縺・°・・+### 泯 荳ｭ蜆ｪ蜈育｢ｺ隱・ 
+-6. **`_recencyWeight` 縺ｮ謖・焚髢｢謨ｰ**
+-   - `1 << exponent`・域怙螟ｧ `1 << 10 = 1024`・・-   - `count` 縺悟､ｧ縺阪＞蝣ｴ蜷医・謖吝虚遒ｺ隱・+4. **Staleness蝗槫ｾｩ繝ｭ繧ｸ繝・け縺ｮ遶ｶ蜷・*
++   - `_beforeSwap` 縺ｨ `_afterSwap` 荳｡譁ｹ縺ｧ Staleness 繧呈､懷・縺吶ｋ險ｭ險医・螳牙・諤ｧ
++   - M-2菫ｮ豁｣・・warmupUntil[poolId] == 0` 譚｡莉ｶ・峨〒遶ｶ蜷医・螳悟・縺ｫ隗｣豸医＆繧後※縺・ｋ縺具ｼ・ 
+-7. **`warmupUntil` 縺ｮ迥ｶ諷狗ｮ｡逅・*
+-   - `_beforeSwap` 縺ｧ縺ｮ繧ｦ繧ｩ繝ｼ繝繧｢繝・・邨ゆｺ・､懷・・・warmupUntil[poolId] = 0` 縺ｫ繝ｪ繧ｻ繝・ヨ・・-   - `_afterSwap` 縺ｧ繧・`warmupUntil` 繧定ｨｭ螳壹☆繧狗ｮ・園縺後≠繧翫∫ｫｶ蜷医・蜿ｯ閭ｽ諤ｧ縺ｯ・・+5. **`_countValidObservations` 縺ｮ蠢・ｦ∵ｧ**
++   - `_calculateVolatility` 縺九ｉ蜻ｼ縺ｰ繧後ｋ邱壼ｽ｢繧ｹ繧ｭ繝｣繝ｳ・域怙螟ｧ100莉ｶ・・+   - `_accumulateWeightedVariation` 蜀・・ `sqrtPriceX96 == 0` 繝√ぉ繝・け縺ｨ驥崎､・＠縺ｦ縺・ｋ縺具ｼ・ 
+-### 蜆ｪ蜈亥ｺｦ・壻ｽ・+### 泙 菴主━蜈育｢ｺ隱・ 
+-8. **繧､繝吶Φ繝・`WarmupPeriodStarted` 縺ｮ `reason` 繝代Λ繝｡繝ｼ繧ｿ**
+-   - `string` 蝙九・繧､繝吶Φ繝医ヱ繝ｩ繝｡繝ｼ繧ｿ・医ぎ繧ｹ繧ｳ繧ｹ繝茨ｼ・-   - `bytes32` 縺ｸ縺ｮ螟画峩繧呈､懆ｨ弱☆縺ｹ縺阪°・・+6. **`getPriceHistory` 縺ｮ繧ｬ繧ｹ豸郁ｲｻ**
++   - 譛螟ｧ100隕∫ｴ縺ｮ繝ｫ繝ｼ繝暦ｼ・view` 髢｢謨ｰ縺ｪ縺ｮ縺ｧ蝠城｡後↑縺・°・滂ｼ・ 
+-9. **`_countValidObservations` 縺ｮ邱壼ｽ｢繧ｹ繧ｭ繝｣繝ｳ**
+-   - `obs.count` 莉ｶ謨ｰ蛻・・繝ｫ繝ｼ繝暦ｼ域怙螟ｧ100・・-   - `_calculateVolatility` 縺九ｉ蜻ｼ縺ｰ繧後ｋ縺溘ａ縲～_beforeSwap` 縺ｮ繧ｬ繧ｹ縺ｫ蠖ｱ髻ｿ
++7. **`isStale()` 縺檎ｩｺ繝舌ャ繝輔ぃ縺ｧ `true` 繧定ｿ斐☆**
++   - `count == 0` 縺ｮ蝣ｴ蜷医↓ `reset()` 縺悟他縺ｰ繧後ｋ・育ｩｺ縺ｮ繝ｪ繧ｻ繝・ヨ・峨・螳溷ｮｳ縺ｪ縺暦ｼ・ 
+-## 蜿り・ヵ繧｡繧､繝ｫ
++## 蜿り・ュ蝣ｱ
+ 
+-- `src/VolatilityDynamicFeeHook.sol`: 繝｡繧､繝ｳ繧ｳ繝ｳ繝医Λ繧ｯ繝茨ｼ・36陦鯉ｼ・-- `src/libraries/ObservationLibrary.sol`: 繝ｪ繝ｳ繧ｰ繝舌ャ繝輔ぃ螳溯｣・-- `test/VolatilityDynamicFeeHookTest.t.sol`: 繝ｦ繝九ャ繝医ユ繧ｹ繝・-- `test/SecurityTest.t.sol`: 繧ｻ繧ｭ繝･繝ｪ繝・ぅ繝・せ繝・-- `config/slither.db.json`: Slither 繝医Μ繧｢繝ｼ繧ｸDB
+-- `DECISIONS.md`: 險ｭ險亥愛譁ｭ縺ｮ險倬鹸
+-- `.gas-snapshot`: 繧ｬ繧ｹ繝吶・繧ｹ繝ｩ繧､繝ｳ
++- **險ｭ險亥愛譁ｭ縺ｮ險倬鹸:** `DECISIONS.md`
++- **Slither 繝医Μ繧｢繝ｼ繧ｸDB:** `config/slither.db.json`
++- **繧ｬ繧ｹ繝吶・繧ｹ繝ｩ繧､繝ｳ:** `.gas-snapshot`
++- **繧ｻ繧ｭ繝･繝ｪ繝・ぅ繝√ぉ繝・け繝ｪ繧ｹ繝・** `SECURITY_CHECKLIST.md`
++- **蜀・Κ繝ｬ繝薙Η繝ｼ繝ｬ繝昴・繝・** `SECURITY_REVIEW_V1.md`
+ 
+-## 迚ｹ縺ｫ遒ｺ隱阪＠縺ｦ縺ｻ縺励＞轤ｹ
++## 譛邨りｳｪ蝠・ 
+-- **ADVISORY莉･荳翫・譛ｪ逋ｺ隕玖ф蠑ｱ諤ｧ縺ｯ縺ゅｋ縺具ｼ・*
+-- **Uniswap v4 Hook 迚ｹ譛峨・繝ｪ繧ｹ繧ｯ**・・beforeSwap`/`afterSwap` 縺ｮ蜻ｼ縺ｳ蜃ｺ縺励さ繝ｳ繝・く繧ｹ繝茨ｼ・-- **迴ｾ蝨ｨ縺ｮ螳溯｣・〒譛ｬ逡ｪ繝・・繝ｭ繧､・・epolia 竊・Polygon・峨↓騾ｲ繧薙〒繧医＞縺具ｼ・*
++> **迴ｾ蝨ｨ縺ｮ螳溯｣・〒 Sepolia繝・せ繝医ロ繝・ヨ繝・・繝ｭ繧､ 竊・Polygon譛ｬ逡ｪ繝・・繝ｭ繧､縺ｫ騾ｲ繧薙〒繧医＞縺具ｼ・*
++> **譛ｬ逡ｪ繝・・繝ｭ繧､蜑阪↓蠢・医・霑ｽ蜉蟇ｾ蠢懊・縺ゅｋ縺具ｼ・*
