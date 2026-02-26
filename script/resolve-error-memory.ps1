@@ -19,28 +19,52 @@ param(
 
     [string]$Resolution = "fixed",
 
-    [string]$VaultRoot = "C:\Users\skyeu\obsidian\TetsuyaSynapse\90-Claude"
+    [string]$VaultRoot = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-LatestUnresolvedNote {
-    param([string]$Root)
+$defaultVaultRoot = "C:\Users\skyeu\obsidian\TetsuyaSynapse\90-Claude"
+$repoRoot = Split-Path -Path $PSScriptRoot -Parent
 
-    $dir = Join-Path $Root "reflections\build"
-    if (-not (Test-Path -LiteralPath $dir)) {
-        throw "Build reflections directory not found: $dir"
+function Get-CandidateRoots {
+    param(
+        [string]$RequestedRoot,
+        [string]$DefaultRoot,
+        [string]$LocalRoot
+    )
+
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        $roots.Add($RequestedRoot.Trim())
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_ERROR_MEMORY_VAULT)) {
+        $roots.Add($env:CODEX_ERROR_MEMORY_VAULT.Trim())
     }
 
-    $candidates = Get-ChildItem -LiteralPath $dir -File -Filter *.md -Recurse |
-        Where-Object {
-            $_.FullName -notmatch "\\reflections\\build\\auto\\" -and
-            $_.Name -ne "_template.md"
-        } |
-        Sort-Object LastWriteTime -Descending
+    $roots.Add($DefaultRoot)
+    $roots.Add($LocalRoot)
 
-    foreach ($file in $candidates) {
+    return @($roots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+function Get-LatestUnresolvedNote {
+    param([string[]]$Roots)
+
+    $candidates = foreach ($root in $Roots) {
+        $dir = Join-Path $root "reflections\build"
+        if (Test-Path -LiteralPath $dir) {
+            Get-ChildItem -LiteralPath $dir -File -Filter *.md -Recurse |
+                Where-Object {
+                    $_.FullName -notmatch "\\reflections\\build\\auto\\" -and
+                    $_.Name -ne "_template.md"
+                }
+        }
+    }
+
+    foreach ($file in ($candidates | Sort-Object LastWriteTime -Descending)) {
         $raw = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
         if ($raw -match "(?m)^resolved:\s*false\s*$") {
             return $file.FullName
@@ -50,14 +74,59 @@ function Get-LatestUnresolvedNote {
     return ""
 }
 
-if (-not (Test-Path -LiteralPath $VaultRoot)) {
-    throw "Vault path not found: $VaultRoot"
+function Add-ResolutionEntry {
+    param(
+        [string]$Text,
+        [string]$EntryLine
+    )
+
+    $lineEnding = if ($Text -match "`r`n") { "`r`n" } else { "`n" }
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($line in ($Text -split "`r?`n")) {
+        $lines.Add($line)
+    }
+
+    $headingIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^## Resolution\s*$") {
+            $headingIndex = $i
+            break
+        }
+    }
+
+    if ($headingIndex -ge 0) {
+        $insertIndex = $lines.Count
+        for ($j = $headingIndex + 1; $j -lt $lines.Count; $j++) {
+            if ($lines[$j] -match "^##\s+") {
+                $insertIndex = $j
+                break
+            }
+        }
+
+        $lines.Insert($insertIndex, $EntryLine)
+
+        if ($insertIndex + 1 -lt $lines.Count -and $lines[$insertIndex + 1] -match "^##\s+") {
+            $lines.Insert($insertIndex + 1, "")
+        }
+
+        $updated = [string]::Join($lineEnding, $lines)
+        if (-not $updated.EndsWith($lineEnding)) {
+            $updated += $lineEnding
+        }
+        return $updated
+    }
+
+    $trimmed = $Text.TrimEnd("`r", "`n")
+    return $trimmed + $lineEnding + $lineEnding + "## Resolution" + $lineEnding + $EntryLine + $lineEnding
 }
 
+$candidateRoots = @(Get-CandidateRoots -RequestedRoot $VaultRoot -DefaultRoot $defaultVaultRoot -LocalRoot $repoRoot)
+$existingRoots = @($candidateRoots | Where-Object { Test-Path -LiteralPath $_ })
+
 if ([string]::IsNullOrWhiteSpace($NotePath)) {
-    $NotePath = Get-LatestUnresolvedNote -Root $VaultRoot
+    $NotePath = Get-LatestUnresolvedNote -Roots $existingRoots
     if ([string]::IsNullOrWhiteSpace($NotePath)) {
-        throw "No unresolved note found."
+        throw "No unresolved note found in configured roots."
     }
 }
 
@@ -93,15 +162,9 @@ else {
 }
 
 $line = "- [$resolvedAt] $Resolution"
-if ($raw -match "(?m)^## Resolution\s*$") {
-    $raw = $raw.TrimEnd() + [Environment]::NewLine + $line + [Environment]::NewLine
-}
-else {
-    $raw = $raw.TrimEnd() + [Environment]::NewLine + [Environment]::NewLine + "## Resolution" + [Environment]::NewLine + $line + [Environment]::NewLine
-}
+$raw = Add-ResolutionEntry -Text $raw -EntryLine $line
 
 if ($PSCmdlet.ShouldProcess($NotePath, "Mark error note as resolved")) {
     Set-Content -LiteralPath $NotePath -Value $raw -Encoding UTF8
     Write-Output "Resolved: $NotePath"
 }
-

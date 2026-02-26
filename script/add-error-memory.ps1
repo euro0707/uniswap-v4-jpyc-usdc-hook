@@ -36,11 +36,14 @@ param(
 
     [bool]$Resolved = $false,
 
-    [string]$VaultRoot = "C:\Users\skyeu\obsidian\TetsuyaSynapse\90-Claude"
+    [string]$VaultRoot = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$defaultVaultRoot = "C:\Users\skyeu\obsidian\TetsuyaSynapse\90-Claude"
+$repoRoot = Split-Path -Path $PSScriptRoot -Parent
 
 function ConvertTo-Slug {
     param([string]$Value)
@@ -73,13 +76,48 @@ function Escape-YamlDoubleQuoted {
     return $escaped
 }
 
-if (-not (Test-Path -LiteralPath $VaultRoot)) {
-    throw "Vault path not found: $VaultRoot"
+function Get-CandidateRoots {
+    param(
+        [string]$RequestedRoot,
+        [string]$DefaultRoot,
+        [string]$LocalRoot
+    )
+
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        $roots.Add($RequestedRoot.Trim())
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_ERROR_MEMORY_VAULT)) {
+        $roots.Add($env:CODEX_ERROR_MEMORY_VAULT.Trim())
+    }
+
+    $roots.Add($DefaultRoot)
+
+    foreach ($candidate in ($roots | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $candidate) {
+            return [PSCustomObject]@{
+                Root       = $candidate
+                IsFallback = $false
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        Root       = $LocalRoot
+        IsFallback = $true
+    }
 }
 
-$targetDir = Join-Path $VaultRoot "reflections\build"
+$resolvedRoot = Get-CandidateRoots -RequestedRoot $VaultRoot -DefaultRoot $defaultVaultRoot -LocalRoot $repoRoot
+$targetDir = Join-Path $resolvedRoot.Root "reflections\build"
+
 if (-not (Test-Path -LiteralPath $targetDir)) {
-    throw "Target directory not found: $targetDir"
+    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+}
+
+if ($resolvedRoot.IsFallback) {
+    Write-Warning "Vault path unavailable. Writing to repo-local fallback: $targetDir"
 }
 
 $today = Get-Date -Format "yyyy-MM-dd"

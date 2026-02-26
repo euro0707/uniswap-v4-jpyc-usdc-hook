@@ -12,7 +12,7 @@ param(
 
     [string]$Fingerprint = "",
 
-    [string]$VaultRoot = "C:\Users\skyeu\obsidian\TetsuyaSynapse\90-Claude",
+    [string]$VaultRoot = "",
 
     [string[]]$Targets = @(
         "reflections\build",
@@ -25,19 +25,29 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path -LiteralPath $VaultRoot)) {
-    throw "Vault path not found: $VaultRoot"
-}
+$defaultVaultRoot = "C:\Users\skyeu\obsidian\TetsuyaSynapse\90-Claude"
+$repoRoot = Split-Path -Path $PSScriptRoot -Parent
 
-$files = foreach ($target in $Targets) {
-    $targetPath = Join-Path $VaultRoot $target
-    if (Test-Path -LiteralPath $targetPath) {
-        Get-ChildItem -LiteralPath $targetPath -File -Recurse -Filter *.md -ErrorAction SilentlyContinue
+function Get-CandidateRoots {
+    param(
+        [string]$RequestedRoot,
+        [string]$DefaultRoot,
+        [string]$LocalRoot
+    )
+
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        $roots.Add($RequestedRoot.Trim())
     }
-}
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_ERROR_MEMORY_VAULT)) {
+        $roots.Add($env:CODEX_ERROR_MEMORY_VAULT.Trim())
+    }
 
-if (-not $files) {
-    throw "No markdown files found under targets: $($Targets -join ', ')"
+    $roots.Add($DefaultRoot)
+    $roots.Add($LocalRoot)
+
+    return @($roots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
 }
 
 function Get-SearchTerms {
@@ -71,6 +81,29 @@ function Get-SearchTerms {
 
     $unique = $terms | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
     return @($unique)
+}
+
+$candidateRoots = @(Get-CandidateRoots -RequestedRoot $VaultRoot -DefaultRoot $defaultVaultRoot -LocalRoot $repoRoot)
+$searchRoots = @($candidateRoots | Where-Object { Test-Path -LiteralPath $_ })
+
+if (-not $searchRoots -or $searchRoots.Count -eq 0) {
+    Write-Output "No searchable root paths found. Checked: $($candidateRoots -join ', ')"
+    exit 0
+}
+
+$files = foreach ($root in $searchRoots) {
+    foreach ($target in $Targets) {
+        $targetPath = Join-Path $root $target
+        if (Test-Path -LiteralPath $targetPath) {
+            Get-ChildItem -LiteralPath $targetPath -File -Recurse -Filter *.md -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+if (-not $files) {
+    Write-Output "No markdown files found under targets: $($Targets -join ', ')"
+    Write-Output "Checked roots: $($searchRoots -join ', ')"
+    exit 0
 }
 
 $searchTerms = @(Get-SearchTerms -RawQuery $Query -RawFingerprint $Fingerprint)
