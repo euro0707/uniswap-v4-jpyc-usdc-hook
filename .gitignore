@@ -64,3 +64,6 @@ slither-report.latest.json
 # Misc
 nul
 post-mcp-cleanup.md
+
+# External nested repos
+_external/
