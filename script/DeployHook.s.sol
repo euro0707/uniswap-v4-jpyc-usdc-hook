@@ -1,62 +1,44 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
-import "forge-std/console.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {VolatilityDynamicFeeHook} from "../src/VolatilityDynamicFeeHook.sol";
+import {Hooks} from "v4-core/libraries/Hooks.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol";
+import {DynamicFeeHook} from "../src/DynamicFeeHook.sol";
 
-/// @title DeployHook
-/// @notice Deploy VolatilityDynamicFeeHook to Polygon Mainnet
-contract DeployHook is Script {
-    // Polygon Mainnet addresses
-    address constant POOL_MANAGER = 0x67366782805870060151383F4BbFF9daB53e5cD6;
-    address constant JPYC = 0x6AE7Dfc73E0dDE2aa99ac063DcF7e8A63265108c;
-    address constant USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174;
-    
-    function run() external {
-        revert("DEPRECATED: Use DeployHookPolygon.s.sol or DeployHookSepolia.s.sol (CREATE2 required for V4 hooks)");
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+contract DeployDynamicFeeHook is Script {
+    // Polygon Mainnet v4 PoolManager (official address)
+    address constant POOL_MANAGER =
+        0x67366782805870060151383F4BbFF9daB53e5cD6;
+    // CREATE2 deployer (chain-agnostic)
+    address constant CREATE2_DEPLOYER =
+        0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
-        vm.startBroadcast(deployerPrivateKey);
-
-        console.log("=== Deploying VolatilityDynamicFeeHook on Polygon Mainnet ===\n");
-        console.log("Deployer:", deployer);
-        console.log("PoolManager:", POOL_MANAGER);
-        console.log("");
-
-        // Deploy Hook (deployer will be the owner)
-        VolatilityDynamicFeeHook hook = new VolatilityDynamicFeeHook(
-            IPoolManager(POOL_MANAGER),
-            deployer
+    function run() public {
+        uint160 flags = uint160(
+            Hooks.AFTER_INITIALIZE_FLAG |
+            Hooks.BEFORE_SWAP_FLAG      |
+            Hooks.AFTER_SWAP_FLAG
         );
-        
-        console.log("Hook deployed at:", address(hook));
-        console.log("");
-        
-        // Deployment summary
-        console.log("=== Deployment Summary ===");
-        console.log("Hook Address:", address(hook));
-        console.log("JPYC:", JPYC);
-        console.log("USDC:", USDC);
-        console.log("");
-        
-        // Next steps
-        console.log("=== Next Steps ===");
-        console.log("1. Initialize pool:");
-        console.log("   poolManager.initialize(poolKey, sqrtPriceX96, hookData)");
-        console.log("");
-        console.log("2. PoolKey configuration:");
-        console.log("   - currency0: JPYC");
-        console.log("   - currency1: USDC");
-        console.log("   - fee: DYNAMIC_FEE_FLAG");
-        console.log("   - tickSpacing: 60");
-        console.log("   - hooks: address(hook)");
-        console.log("");
-        console.log("3. Verify on Polygonscan:");
-        console.log("   https://polygonscan.com/address/%s", address(hook));
-        
-        vm.stopBroadcast();
+
+        address USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
+        address JPYC = 0x6AE7Dfc73E0dDE2aa99ac063DcF7e8A63265108c;
+        bytes memory args = abi.encode(
+            IPoolManager(POOL_MANAGER), USDC, JPYC
+        );
+        (address hookAddr, bytes32 salt) = HookMiner.find(
+            CREATE2_DEPLOYER, flags,
+            type(DynamicFeeHook).creationCode, args
+        );
+        console.log("Hook address:", hookAddr);
+        console.log("Salt:", vm.toString(salt));
+
+        vm.broadcast();
+        DynamicFeeHook hook = new DynamicFeeHook{salt: salt}(
+            IPoolManager(POOL_MANAGER), USDC, JPYC
+        );
+        require(address(hook) == hookAddr, "Address mismatch!");
+        console.log("Deployed:", address(hook));
     }
 }
