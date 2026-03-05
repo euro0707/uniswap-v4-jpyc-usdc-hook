@@ -151,9 +151,11 @@ contract DynamicFeeHook is BaseHook {
             cumDelta = blockTickDelta[id] + tickDelta;
             if (cumDelta < blockTickDelta[id]) cumDelta = type(uint24).max;
         }
-        if (cumDelta == 0) return FEE_CALM;
-        if (cumDelta <= 1) return FEE_NORMAL;
-        if (cumDelta <= 3) return FEE_MEDIUM;
+        // Thresholds calibrated for JPYC/USDC:
+        // ~0.1% move ≈ 10 ticks, ~0.5% move ≈ 50 ticks
+        if (cumDelta == 0)  return FEE_CALM;
+        if (cumDelta <= 10) return FEE_NORMAL;
+        if (cumDelta <= 50) return FEE_MEDIUM;
         return FEE_HIGH;
     }
 
@@ -180,11 +182,15 @@ contract DynamicFeeHook is BaseHook {
     ) external view returns (uint8) {
         PoolId id = key.toId();
         (, int24 currentTick, , ) = poolManager.getSlot0(id);
-        uint24 cum = blockTickDelta[id]
-            + _absTickDiff(currentTick, lastTick[id]);
-        if (cum == 0) return 0;
-        if (cum <= 1) return 1;
-        if (cum <= 3) return 2;
+        uint24 cum;
+        unchecked {
+            uint24 delta = _absTickDiff(currentTick, lastTick[id]);
+            cum = blockTickDelta[id] + delta;
+            if (cum < blockTickDelta[id]) cum = type(uint24).max;
+        }
+        if (cum == 0)  return 0;
+        if (cum <= 10) return 1;
+        if (cum <= 50) return 2;
         return 3;
     }
 }

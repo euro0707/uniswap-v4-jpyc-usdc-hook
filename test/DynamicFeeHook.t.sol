@@ -147,6 +147,50 @@ contract DynamicFeeHookTest is Test, Deployers {
         assertLe(fee, hook.FEE_HIGH());
     }
 
+    /// Multi-block decay: blockTickDelta halves (not resets) on new block
+    function test_MultiBlockDecay_HalvesNotResets() public {
+        // Block N: perform a large swap to accumulate blockTickDelta
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: -1e24,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ZERO_BYTES
+        );
+        uint24 deltaAfterBlockN = hook.blockTickDelta(poolId);
+        assertTrue(deltaAfterBlockN > 0, "blockTickDelta should be non-zero after large swap");
+
+        // Advance to block N+1
+        vm.roll(block.number + 1);
+
+        // Block N+1: perform a small swap to trigger _afterSwap decay
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: false,
+                amountSpecified: 1e15,
+                sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ZERO_BYTES
+        );
+        uint24 deltaAfterBlockN1 = hook.blockTickDelta(poolId);
+
+        // After first swap in new block, decay was applied (divided by 2)
+        // then the new swap's delta was NOT added (else branch design).
+        // So deltaAfterBlockN1 should be <= deltaAfterBlockN / 2 + small_delta.
+        // At minimum it must be strictly less than deltaAfterBlockN (i.e., not a full reset that then accumulates back).
+        assertLt(deltaAfterBlockN1, deltaAfterBlockN, "blockTickDelta should decay, not persist at block N value");
+        // And it must be > 0 (decay, not reset to 0)
+        // Note: if deltaAfterBlockN == 1, integer div gives 0; skip that edge case.
+        if (deltaAfterBlockN >= 2) {
+            assertGt(deltaAfterBlockN1, 0, "blockTickDelta should not reset to zero (decay, not reset)");
+        }
+    }
+
     /// Invalid token pair should revert on initialize
     function test_InvalidPair_Reverts() public {
         // Deploy a new hook with different allowed tokens
