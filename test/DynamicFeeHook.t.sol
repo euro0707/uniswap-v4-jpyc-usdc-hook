@@ -107,11 +107,12 @@ contract DynamicFeeHookTest is Test, Deployers {
     /// Swap updates the tick
     function test_AfterSwap_TickUpdated() public {
         int24 tickBefore = hook.lastTick(poolId);
+        // Use a large swap amount to guarantee tick movement
         swapRouter.swap(
             poolKey,
             SwapParams({
                 zeroForOne: true,
-                amountSpecified: -1e18,
+                amountSpecified: -1e24,
                 sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             }),
             PoolSwapTest.TestSettings({
@@ -121,12 +122,26 @@ contract DynamicFeeHookTest is Test, Deployers {
             ZERO_BYTES
         );
         int24 tickAfter = hook.lastTick(poolId);
-        // tick should have moved after swap
-        assertTrue(tickAfter != tickBefore || tickAfter == tickBefore);
+        assertTrue(tickAfter != tickBefore, "tick should move after large swap");
     }
 
-    /// Fuzz: fee always within bounds
-    function testFuzz_FeeAlwaysInBounds(int24) public view {
+    /// Fuzz: fee always within bounds regardless of swap size
+    function testFuzz_FeeAlwaysInBounds(int24 swapSeed) public {
+        // Bound to a meaningful non-zero swap range
+        int256 swapAmount = bound(int256(swapSeed), -1e22, -1e15);
+        swapRouter.swap(
+            poolKey,
+            SwapParams({
+                zeroForOne: true,
+                amountSpecified: swapAmount,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            PoolSwapTest.TestSettings({
+                takeClaims: false,
+                settleUsingBurn: false
+            }),
+            ZERO_BYTES
+        );
         uint24 fee = hook.previewFee(poolKey);
         assertGe(fee, hook.FEE_CALM());
         assertLe(fee, hook.FEE_HIGH());

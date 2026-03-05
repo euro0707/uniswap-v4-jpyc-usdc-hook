@@ -131,7 +131,10 @@ contract DynamicFeeHook is BaseHook {
                     ? type(uint24).max : newCum;
             }
         } else {
-            blockTickDelta[id] = 0;
+            // Decay by 50% instead of resetting to 0.
+            // This makes cross-block MEV attacks more expensive by preserving
+            // some volatility signal across block boundaries.
+            blockTickDelta[id] = blockTickDelta[id] / 2;
             lastBlock[id]      = block.number;
         }
         return (BaseHook.afterSwap.selector, 0);
@@ -142,7 +145,12 @@ contract DynamicFeeHook is BaseHook {
     ) internal view returns (uint24) {
         if (!isInitialized[id]) return FEE_NORMAL;
         uint24 tickDelta = _absTickDiff(currentTick, lastTick[id]);
-        uint24 cumDelta  = blockTickDelta[id] + tickDelta;
+        // Overflow-safe addition: if wrapping occurs, volatility is extreme → clamp to max.
+        uint24 cumDelta;
+        unchecked {
+            cumDelta = blockTickDelta[id] + tickDelta;
+            if (cumDelta < blockTickDelta[id]) cumDelta = type(uint24).max;
+        }
         if (cumDelta == 0) return FEE_CALM;
         if (cumDelta <= 1) return FEE_NORMAL;
         if (cumDelta <= 3) return FEE_MEDIUM;
