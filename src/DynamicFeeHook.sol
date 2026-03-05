@@ -123,19 +123,18 @@ contract DynamicFeeHook is BaseHook {
         emit TickUpdated(id, oldTick, newTick);
         // CEI: update state first (reentrancy protection)
         lastTick[id] = newTick;
-        if (lastBlock[id] == block.number) {
-            uint24 delta = _absTickDiff(oldTick, newTick);
-            unchecked {
-                uint24 newCum = blockTickDelta[id] + delta;
-                blockTickDelta[id] = newCum < blockTickDelta[id]
-                    ? type(uint24).max : newCum;
-            }
-        } else {
+        uint24 delta = _absTickDiff(oldTick, newTick);
+        uint24 base = blockTickDelta[id];
+        if (lastBlock[id] != block.number) {
             // Decay by 50% instead of resetting to 0.
             // This makes cross-block MEV attacks more expensive by preserving
             // some volatility signal across block boundaries.
-            blockTickDelta[id] = blockTickDelta[id] / 2;
-            lastBlock[id]      = block.number;
+            base = base / 2;
+            lastBlock[id] = block.number;
+        }
+        unchecked {
+            uint24 newCum = base + delta;
+            blockTickDelta[id] = newCum < base ? type(uint24).max : newCum;
         }
         return (BaseHook.afterSwap.selector, 0);
     }

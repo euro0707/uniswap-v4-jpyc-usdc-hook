@@ -147,7 +147,7 @@ contract DynamicFeeHookTest is Test, Deployers {
         assertLe(fee, hook.FEE_HIGH());
     }
 
-    /// Multi-block decay: blockTickDelta halves (not resets) on new block
+    /// Multi-block decay: blockTickDelta decays and also includes first swap delta in new block
     function test_MultiBlockDecay_HalvesNotResets() public {
         // Block N: perform a large swap to accumulate blockTickDelta
         swapRouter.swap(
@@ -165,6 +165,7 @@ contract DynamicFeeHookTest is Test, Deployers {
 
         // Advance to block N+1
         vm.roll(block.number + 1);
+        int24 tickBeforeBlockN1 = hook.lastTick(poolId);
 
         // Block N+1: perform a small swap to trigger _afterSwap decay
         swapRouter.swap(
@@ -177,18 +178,25 @@ contract DynamicFeeHookTest is Test, Deployers {
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ZERO_BYTES
         );
+        int24 tickAfterBlockN1 = hook.lastTick(poolId);
         uint24 deltaAfterBlockN1 = hook.blockTickDelta(poolId);
-
-        // After first swap in new block, decay was applied (divided by 2)
-        // then the new swap's delta was NOT added (else branch design).
-        // So deltaAfterBlockN1 should be <= deltaAfterBlockN / 2 + small_delta.
-        // At minimum it must be strictly less than deltaAfterBlockN (i.e., not a full reset that then accumulates back).
-        assertLt(deltaAfterBlockN1, deltaAfterBlockN, "blockTickDelta should decay, not persist at block N value");
-        // And it must be > 0 (decay, not reset to 0)
-        // Note: if deltaAfterBlockN == 1, integer div gives 0; skip that edge case.
-        if (deltaAfterBlockN >= 2) {
-            assertGt(deltaAfterBlockN1, 0, "blockTickDelta should not reset to zero (decay, not reset)");
+        uint24 deltaFromFirstSwapN1 = _absTickDiff(tickAfterBlockN1, tickBeforeBlockN1);
+        uint24 decayed = deltaAfterBlockN / 2;
+        uint24 expected;
+        unchecked {
+            uint24 sum = decayed + deltaFromFirstSwapN1;
+            expected = sum < decayed ? type(uint24).max : sum;
         }
+
+        // New-block first swap should both decay prior signal and include current tick movement.
+        assertEq(deltaAfterBlockN1, expected, "blockTickDelta should decay then accumulate first swap delta");
+    }
+
+    function _absTickDiff(int24 a, int24 b) internal pure returns (uint24) {
+        int256 diff = int256(a) - int256(b);
+        if (diff < 0) diff = -diff;
+        if (diff > int256(uint256(type(uint24).max))) return type(uint24).max;
+        return uint24(uint256(diff));
     }
 
     /// Invalid token pair should revert on initialize
