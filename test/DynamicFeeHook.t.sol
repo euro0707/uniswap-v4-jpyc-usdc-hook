@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
@@ -196,6 +196,8 @@ contract DynamicFeeHookTest is Test, Deployers {
         int256 diff = int256(a) - int256(b);
         if (diff < 0) diff = -diff;
         if (diff > int256(uint256(type(uint24).max))) return type(uint24).max;
+        // casting is safe because values above uint24.max are clamped above
+        // forge-lint: disable-next-line(unsafe-typecast)
         return uint24(uint256(diff));
     }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "forge-std/Script.sol";
+import {Script, console2} from "forge-std/Script.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol";
@@ -22,23 +22,23 @@ contract DeployDynamicFeeHook is Script {
             Hooks.AFTER_SWAP_FLAG
         );
 
-        address USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
-        address JPYC = 0x6AE7Dfc73E0dDE2aa99ac063DcF7e8A63265108c;
+        address usdc = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
+        address jpyc = 0x6AE7Dfc73E0dDE2aa99ac063DcF7e8A63265108c;
         bytes memory args = abi.encode(
-            IPoolManager(POOL_MANAGER), USDC, JPYC
+            IPoolManager(POOL_MANAGER), usdc, jpyc
         );
         (address hookAddr, bytes32 salt) = HookMiner.find(
             CREATE2_DEPLOYER, flags,
             type(DynamicFeeHook).creationCode, args
         );
-        console.log("Hook address:", hookAddr);
-        console.log("Salt:", vm.toString(salt));
+        console2.log("Hook address:", hookAddr);
+        console2.log("Salt:", vm.toString(salt));
 
         vm.broadcast();
         DynamicFeeHook hook = new DynamicFeeHook{salt: salt}(
-            IPoolManager(POOL_MANAGER), USDC, JPYC
+            IPoolManager(POOL_MANAGER), usdc, jpyc
         );
         require(address(hook) == hookAddr, "Address mismatch!");
-        console.log("Deployed:", address(hook));
+        console2.log("Deployed:", address(hook));
     }
 }

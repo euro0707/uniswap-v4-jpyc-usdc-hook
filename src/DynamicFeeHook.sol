@@ -165,6 +165,8 @@ contract DynamicFeeHook is BaseHook {
         if (diff < 0) diff = -diff;
         if (diff > int256(uint256(type(uint24).max)))
             return type(uint24).max;
+        // casting is safe because values above uint24.max are clamped above
+        // forge-lint: disable-next-line(unsafe-typecast)
         return uint24(uint256(diff));
     }
 
