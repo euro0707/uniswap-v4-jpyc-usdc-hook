@@ -23,7 +23,7 @@ contract DeployDynamicFeeHook is Script {
         );
 
         address usdc = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
-        address jpyc = 0x6AE7Dfc73E0dDE2aa99ac063DcF7e8A63265108c;
+        address jpyc = 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29;
         bytes memory args = abi.encode(
             IPoolManager(POOL_MANAGER), usdc, jpyc
         );
