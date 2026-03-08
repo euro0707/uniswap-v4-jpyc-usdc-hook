@@ -9,11 +9,15 @@ import {DynamicFeeHook} from "../src/DynamicFeeHook.sol";
 
 contract DeployDynamicFeeHook is Script {
     // Polygon Mainnet v4 PoolManager (official address)
-    address constant POOL_MANAGER =
+    address internal constant DEFAULT_POOL_MANAGER =
         0x67366782805870060151383F4BbFF9daB53e5cD6;
     // CREATE2 deployer (chain-agnostic)
-    address constant CREATE2_DEPLOYER =
+    address internal constant DEFAULT_CREATE2_DEPLOYER =
         0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    address internal constant DEFAULT_USDC =
+        0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
+    address internal constant DEFAULT_JPYC =
+        0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29;
 
     function run() public {
         uint160 flags = uint160(
@@ -22,13 +26,20 @@ contract DeployDynamicFeeHook is Script {
             Hooks.AFTER_SWAP_FLAG
         );
 
-        address usdc = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
-        address jpyc = 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29;
+        address poolManager = vm.envOr("POOL_MANAGER", DEFAULT_POOL_MANAGER);
+        address create2Deployer = vm.envOr(
+            "CREATE2_DEPLOYER", DEFAULT_CREATE2_DEPLOYER
+        );
+        address usdc = vm.envOr("ACTIVE_USDC_ADDRESS", DEFAULT_USDC);
+        address jpyc = vm.envOr("ACTIVE_JPYC_ADDRESS", DEFAULT_JPYC);
+        require(usdc != address(0) && jpyc != address(0), "zero token address");
+        require(usdc != jpyc, "identical token addresses");
+
         bytes memory args = abi.encode(
-            IPoolManager(POOL_MANAGER), usdc, jpyc
+            IPoolManager(poolManager), usdc, jpyc
         );
         (address hookAddr, bytes32 salt) = HookMiner.find(
-            CREATE2_DEPLOYER, flags,
+            create2Deployer, flags,
             type(DynamicFeeHook).creationCode, args
         );
         console2.log("Hook address:", hookAddr);
@@ -36,7 +47,7 @@ contract DeployDynamicFeeHook is Script {
 
         vm.broadcast();
         DynamicFeeHook hook = new DynamicFeeHook{salt: salt}(
-            IPoolManager(POOL_MANAGER), usdc, jpyc
+            IPoolManager(poolManager), usdc, jpyc
         );
         require(address(hook) == hookAddr, "Address mismatch!");
         console2.log("Deployed:", address(hook));

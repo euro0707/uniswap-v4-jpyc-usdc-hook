@@ -20,6 +20,12 @@ import {Currency} from "v4-core/types/Currency.sol";
 contract CreateHookPoolAndMint is Script {
     using PoolIdLibrary for PoolKey;
 
+    uint24 internal constant REFERENCE_POOL_FEE = 500;
+    uint256 internal constant DEFAULT_TICK_SPACING = 10;
+    uint256 internal constant DEFAULT_RANGE_STEPS = 120;
+    uint256 internal constant DEFAULT_USDC_MAX = 5_000_000; // 5 USDC (6 decimals)
+    uint256 internal constant DEFAULT_JPYC_MAX = 800 ether; // 800 JPYC (18 decimals)
+
     address internal constant DEFAULT_PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     address internal constant DEFAULT_ACTIVE_HOOK = 0x1D4D185b1D0f86561f1D24DE10E7473e2772d0C0;
     address internal constant DEFAULT_USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
@@ -37,29 +43,18 @@ contract CreateHookPoolAndMint is Script {
         address usdc = vm.envOr("ACTIVE_USDC_ADDRESS", DEFAULT_USDC);
         address jpyc = vm.envOr("ACTIVE_JPYC_ADDRESS", DEFAULT_JPYC);
 
-        uint256 tickSpacingRaw = vm.envOr("TICK_SPACING", uint256(10));
-        uint256 rangeStepsRaw = vm.envOr("RANGE_STEPS", uint256(120));
-        uint256 usdcMaxRaw = vm.envOr("USDC_MAX", uint256(5_000_000)); // 5 USDC (6 decimals)
-        uint256 jpycMaxRaw = vm.envOr("JPYC_MAX", uint256(800 ether)); // 800 JPYC (18 decimals)
+        uint256 tickSpacingRaw = vm.envOr("TICK_SPACING", DEFAULT_TICK_SPACING);
+        uint256 rangeStepsRaw = vm.envOr("RANGE_STEPS", DEFAULT_RANGE_STEPS);
+        uint256 usdcMaxRaw = vm.envOr("USDC_MAX", DEFAULT_USDC_MAX);
+        uint256 jpycMaxRaw = vm.envOr("JPYC_MAX", DEFAULT_JPYC_MAX);
         uint256 permit2ExpiryRaw = vm.envOr("PERMIT2_EXPIRY", uint256(block.timestamp + 30 days));
         uint256 deadlineRaw = vm.envOr("DEADLINE", uint256(block.timestamp + 15 minutes));
 
-        require(tickSpacingRaw > 0 && tickSpacingRaw <= uint256(uint24(type(int24).max)), "invalid tickSpacing");
-        require(rangeStepsRaw > 0 && rangeStepsRaw <= uint256(uint24(type(int24).max)), "invalid rangeSteps");
-        require(usdcMaxRaw <= type(uint128).max, "USDC_MAX too large");
-        require(jpycMaxRaw <= type(uint128).max, "JPYC_MAX too large");
-        require(permit2ExpiryRaw <= type(uint48).max, "PERMIT2_EXPIRY too large");
-
-        // forge-lint: disable-next-line(unsafe-typecast)
-        int24 tickSpacing = int24(int256(tickSpacingRaw));
-        // forge-lint: disable-next-line(unsafe-typecast)
-        int24 rangeSteps = int24(int256(rangeStepsRaw));
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint128 usdcMax = uint128(usdcMaxRaw);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint128 jpycMax = uint128(jpycMaxRaw);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint48 permit2Expiry = uint48(permit2ExpiryRaw);
+        int24 tickSpacing = _toInt24(tickSpacingRaw, "invalid tickSpacing");
+        int24 rangeSteps = _toInt24(rangeStepsRaw, "invalid rangeSteps");
+        uint128 usdcMax = _toUint128(usdcMaxRaw, "USDC_MAX too large");
+        uint128 jpycMax = _toUint128(jpycMaxRaw, "JPYC_MAX too large");
+        uint48 permit2Expiry = _toUint48(permit2ExpiryRaw, "PERMIT2_EXPIRY too large");
 
         // PoolKey must be token address sorted.
         (address token0, address token1, bool usdcIsToken0) =
@@ -71,7 +66,7 @@ contract CreateHookPoolAndMint is Script {
         PoolKey memory referenceKey = PoolKey({
             currency0: Currency.wrap(token0),
             currency1: Currency.wrap(token1),
-            fee: 500, // existing vanilla pool used only as a price reference
+            fee: REFERENCE_POOL_FEE, // existing vanilla pool used only as a price reference
             tickSpacing: tickSpacing,
             hooks: IHooks(address(0))
         });
@@ -90,32 +85,10 @@ contract CreateHookPoolAndMint is Script {
 
         PoolId hookPoolId = hookKey.toId();
 
-        uint160 initSqrtPriceX96;
-        bool referencePriceFound;
-        {
-            PoolId referencePoolId = referenceKey.toId();
-            try stateView.getSlot0(referencePoolId) returns (uint160 sqrtPriceX96, int24, uint24, uint24) {
-                if (sqrtPriceX96 > 0) {
-                    initSqrtPriceX96 = sqrtPriceX96;
-                    referencePriceFound = true;
-                }
-            } catch {}
-            if (!referencePriceFound) {
-                uint256 fallbackSqrtPriceRaw = vm.envOr("INIT_SQRT_PRICE_X96", uint256(0));
-                require(fallbackSqrtPriceRaw > 0, "missing INIT_SQRT_PRICE_X96");
-                require(fallbackSqrtPriceRaw <= type(uint160).max, "INIT_SQRT_PRICE_X96 too large");
-                // forge-lint: disable-next-line(unsafe-typecast)
-                initSqrtPriceX96 = uint160(fallbackSqrtPriceRaw);
-            }
-        }
-
-        bool alreadyInitialized;
-        try stateView.getSlot0(hookPoolId) returns (uint160 sqrtPriceX96, int24, uint24, uint24) {
-            if (sqrtPriceX96 > 0) {
-                alreadyInitialized = true;
-                initSqrtPriceX96 = sqrtPriceX96;
-            }
-        } catch {}
+        uint160 initSqrtPriceX96 = _resolveInitSqrtPriceX96(stateView, referenceKey);
+        uint160 existingHookSqrtPriceX96 = _readSqrtPriceX96(stateView, hookPoolId);
+        bool alreadyInitialized = existingHookSqrtPriceX96 > 0;
+        if (alreadyInitialized) initSqrtPriceX96 = existingHookSqrtPriceX96;
 
         console2.log("owner", owner);
         console2.log("positionManager", positionManagerAddr);
@@ -194,5 +167,52 @@ contract CreateHookPoolAndMint is Script {
         int24 compressed = tick / spacing;
         if (tick < 0 && (tick % spacing) != 0) compressed--;
         return compressed * spacing;
+    }
+
+    function _resolveInitSqrtPriceX96(
+        IStateView stateView,
+        PoolKey memory referenceKey
+    ) internal view returns (uint160 initSqrtPriceX96) {
+        uint160 referenceSqrtPriceX96 = _readSqrtPriceX96(stateView, referenceKey.toId());
+        if (referenceSqrtPriceX96 > 0) return referenceSqrtPriceX96;
+
+        uint256 fallbackSqrtPriceRaw = vm.envOr("INIT_SQRT_PRICE_X96", uint256(0));
+        require(fallbackSqrtPriceRaw > 0, "missing INIT_SQRT_PRICE_X96");
+        return _toUint160(fallbackSqrtPriceRaw, "INIT_SQRT_PRICE_X96 too large");
+    }
+
+    function _readSqrtPriceX96(
+        IStateView stateView,
+        PoolId poolId
+    ) internal view returns (uint160 sqrtPriceX96) {
+        try stateView.getSlot0(poolId) returns (uint160 value, int24, uint24, uint24) {
+            return value;
+        } catch {
+            return 0;
+        }
+    }
+
+    function _toInt24(uint256 value, string memory errorMessage) internal pure returns (int24 result) {
+        require(value > 0 && value <= uint256(uint24(type(int24).max)), errorMessage);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        result = int24(int256(value));
+    }
+
+    function _toUint48(uint256 value, string memory errorMessage) internal pure returns (uint48 result) {
+        require(value <= type(uint48).max, errorMessage);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        result = uint48(value);
+    }
+
+    function _toUint128(uint256 value, string memory errorMessage) internal pure returns (uint128 result) {
+        require(value <= type(uint128).max, errorMessage);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        result = uint128(value);
+    }
+
+    function _toUint160(uint256 value, string memory errorMessage) internal pure returns (uint160 result) {
+        require(value <= type(uint160).max, errorMessage);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        result = uint160(value);
     }
 }
