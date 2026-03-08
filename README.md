@@ -1,173 +1,149 @@
-﻿# Uniswap V4 Dynamic Fee Hook
+# Uniswap v4 Dynamic Fee Hook (JPYC/USDC on Polygon)
 
-**Polygon Mainnet 上で JPYC/USDC ペアのボラティリティベース動的手数料を実現する Uniswap V4 Hook**
+Polygon Mainnet 上の `JPYC/USDC` 向けに、Uniswap v4 Hook で動的手数料を実装・運用するリポジトリです。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Solidity](https://img.shields.io/badge/Solidity-0.8.26-blue)](https://soliditylang.org/)
-[![Foundry](https://img.shields.io/badge/Built%20with-Foundry-orange)](https://getfoundry.sh/)
+## はじめての人向け最短手順
 
----
+「とりあえず動かしたい」場合は、この3ステップだけ見れば進められます。
 
-## Environment Note
+1. `.env.example` を `.env` にコピーして、`DEPLOYER_PRIVATE_KEY` と `POLYGON_RPC_URL` を設定する
+2. `forge script ...CreateHookPoolAndMint --rpc-url polygon -vv` で dry-run する
+3. 問題なければ `--broadcast` を付けて本番送信する
 
-- Foundry/forge is available in this project environment.
-- If `forge` is not resolved from `PATH`, run with:
-  `C:\\Users\\skyeu\\.foundry\\bin\\forge.exe` 
+成功すると:
 
-## プロジェクト概要
+- Wallet に LP ポジション NFT が増える
+- Uniswap UI の Positions で `v4` の USDC/JPYC ポジションが表示される
 
-Uniswap V4 の Hook システムを使用して、JPYC/USDC ペアの tick 変動（ボラティリティ）に応じた動的手数料を実現します。
+## 何ができるか
 
-### 設計思想
+このリポジトリでできることを、できるだけ簡単に言うと次の3つです。
 
-- **シンプル**: 1ファイルの Hook コントラクト、外部依存なし
-- **安全**: `onlyPoolManager` + トークンペア検証 + CEI パターン
-- **ガス効率**: tick 差分のみで手数料を決定（オラクル不要）
+1. 「手数料ルール付きのプール」を作れます。  
+通常のプールではなく、Hook（追加ルール）付きのプールを作成できます。
 
-### 手数料テーブル
+2. そのプールに「流動性」を入れられます。  
+USDC と JPYC を預けて、LP ポジション（NFT）を作成できます。
 
-| レベル | tick 変動 | 手数料 | 用途 |
-|--------|-----------|--------|------|
-| CALM   | 0         | 0.05%  | 完全安定時 |
-| NORMAL | 1         | 0.10%  | 通常取引 |
-| MEDIUM | 2-3       | 0.30%  | 中ボラ |
-| HIGH   | 4+        | 1.00%  | 高ボラ |
+3. 本番送信前に「リハーサル」ができます。  
+`dry-run` で結果を先に確認してから、`--broadcast` で本番実行できます。
 
----
+補足（用語ミニ説明）:
 
-## Environment Note
+- Hook: Uniswap v4 で手数料や挙動を追加できる仕組み
+- Pool: トークンを交換するための市場
+- LP: Pool に資金を預ける人（Liquidity Provider）
 
-- Foundry/forge is available in this project environment.
-- If `forge` is not resolved from `PATH`, run with:
-  `C:\\Users\\skyeu\\.foundry\\bin\\forge.exe` 
+## 現在の運用対象（本番）
 
-## テスト結果
+- Chain: Polygon Mainnet (`137`)
+- PoolManager: `0x67366782805870060151383F4BbFF9daB53e5cD6`
+- PositionManager: `0x1eC2EbF4f37e7363FDfE3551602425af0B3CeEF9`
+- StateView: `0x5Ea1bD7974C8A611cBAb0BDCAFCb1D9cc9B3BA5A`
+- Active Hook: `0x1D4D185b1D0f86561f1D24DE10E7473e2772d0C0`
+- Active Pair: USDC `0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359` / JPYC `0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29`
 
-**7/7 tests passed (100%)**
+## リポジトリ構成
 
-| テスト | 内容 |
-|--------|------|
-| `test_AfterInitialize_TickRecorded` | 初期化後に tick が記録されるか |
-| `test_AfterInitialize_IsInitialized` | isInitialized フラグが設定されるか |
-| `test_PreviewFee_InRange` | 手数料が FEE_CALM..FEE_HIGH 範囲内か |
-| `test_Security_DirectCallReverts` | 外部からの直接呼び出しが revert するか |
-| `test_AfterSwap_TickUpdated` | Swap 後に tick が更新されるか |
-| `testFuzz_FeeAlwaysInBounds` | Fuzz (10,000 runs): 手数料が常に範囲内か |
-| `test_InvalidPair_Reverts` | 不正なトークンペアで revert するか |
+- `src/DynamicFeeHook.sol`: メイン hook コントラクト
+- `script/DeployHook.s.sol`: hook デプロイスクリプト
+- `script/CreateHookPoolAndMint.s.sol`: hook pool 初期化 + LP mint スクリプト
+- `test/DynamicFeeHook.t.sol`: ユニットテスト
 
----
+## 前提
 
-## Environment Note
+- Foundry インストール済み
+- Polygon RPC が利用可能
+- 実行ウォレットに `POL`（ガス）と `USDC/JPYC`（LP原資）がある
 
-- Foundry/forge is available in this project environment.
-- If `forge` is not resolved from `PATH`, run with:
-  `C:\\Users\\skyeu\\.foundry\\bin\\forge.exe` 
+`forge` が PATH にない環境では以下を使ってください。
 
-## アーキテクチャ
-
-```
-src/
-└── DynamicFeeHook.sol       # メイン Hook コントラクト
-
-test/
-└── DynamicFeeHook.t.sol     # テストスイート (7 tests)
-
-script/
-└── DeployHook.s.sol         # デプロイスクリプト (HookMiner + CREATE2)
+```powershell
+C:/Users/skyeu/.foundry/bin/forge.exe
 ```
 
-### Hook フロー
+## セットアップ
 
-```
-Pool.initialize()
-  └─ afterInitialize: tick 記録 + トークンペア検証
-
-Pool.swap()
-  ├─ beforeSwap: tick 差分から手数料を計算 → FEE_OVERRIDE_FLAG で上書き
-  └─ afterSwap:  lastTick / blockTickDelta を更新 (CEI パターン)
+```powershell
+copy .env.example .env
 ```
 
-### セキュリティ
+`.env` の最低必須項目:
 
-- **onlyPoolManager**: 全フック関数は PoolManager からのみ呼び出し可能
-- **トークンペア検証**: `afterInitialize` で許可されたペア以外を拒否
-- **CEI パターン**: `afterSwap` でステート更新を先に実行（リエントランシー対策）
-- **uint24 オーバーフロー防止**: `blockTickDelta` の累積時にサチュレーション処理
-- **immutable トークン**: コンストラクタで固定、変更不可
+- `DEPLOYER_PRIVATE_KEY`
+- `POLYGON_RPC_URL`
+- `POSITION_MANAGER`
+- `STATE_VIEW`
 
----
+LP mint 量は以下で制御します（上限値）。
 
-## Environment Note
+- `USDC_MAX`（6 decimals）
+- `JPYC_MAX`（18 decimals）
 
-- Foundry/forge is available in this project environment.
-- If `forge` is not resolved from `PATH`, run with:
-  `C:\\Users\\skyeu\\.foundry\\bin\\forge.exe` 
+## 1) Build / Test
 
-## クイックスタート
-
-```bash
-# 依存関係のインストール
-forge install
-
-# 環境変数の設定
-cp .env.example .env
-
-# ビルド
+```powershell
 forge build
-
-# テスト
-forge test -vvv
-
-# ガスレポート
-forge test --gas-report
-
-# デプロイ (Polygon Mainnet)
-forge script script/DeployHook.s.sol:DeployDynamicFeeHook \
-  --rpc-url $POLYGON_RPC_URL --broadcast
+forge test -vv
 ```
 
----
+## 2) Hook をデプロイ
 
-## Environment Note
+```powershell
+forge script script/DeployHook.s.sol:DeployDynamicFeeHook --rpc-url polygon --broadcast -vvvv
+```
 
-- Foundry/forge is available in this project environment.
-- If `forge` is not resolved from `PATH`, run with:
-  `C:\\Users\\skyeu\\.foundry\\bin\\forge.exe` 
+ポイント:
 
-## 変更履歴
+- `DeployHook.s.sol` は `POOL_MANAGER`, `CREATE2_DEPLOYER`, `ACTIVE_USDC_ADDRESS`, `ACTIVE_JPYC_ADDRESS` を `.env` で上書き可能
+- 出力される hook アドレスと `HookMiner` で見つけたアドレスが一致しない場合は失敗します
 
-### v2.0 - ガイドベース再構築 (2026-03-06)
+## 3) Hook Pool を作成して LP mint
 
-旧実装 (`VolatilityDynamicFeeHook`) を完全に削除し、ガイドドキュメントをベースにシンプルな `DynamicFeeHook` として再構築。
+まず dry-run:
 
-**削除したもの**:
-- `VolatilityDynamicFeeHook.sol` + `ObservationLibrary.sol` + `MockERC20.sol`
-- 旧テスト 5 ファイル（Fork/Security/AddLiquidity 等）
-- 旧デプロイスクリプト 10+ ファイル
-- 旧ドキュメント 27 ファイル
-- CI/CD, Slither 設定, PowerShell スクリプト等
+```powershell
+forge script script/CreateHookPoolAndMint.s.sol:CreateHookPoolAndMint --rpc-url polygon -vv
+```
 
-**新規作成**:
-- `src/DynamicFeeHook.sol` — tick 差分ベースの動的手数料 Hook
-- `test/DynamicFeeHook.t.sol` — 7 テスト (fuzz 10,000 runs 含む)
-- `script/DeployHook.s.sol` — HookMiner + CREATE2 デプロイ
+問題なければ本番実行:
 
-**技術的な調整**:
-- BaseHook の `_internal` override パターンに適合（`_afterInitialize`, `_beforeSwap`, `_afterSwap`）
-- `remappings.txt` に `v4-core-test/` 追加（Deployers.sol 解決用）
-- `foundry.toml` の `fuzz.runs` を 256 → 10,000 に変更
+```powershell
+forge script script/CreateHookPoolAndMint.s.sol:CreateHookPoolAndMint --rpc-url polygon --broadcast -vvvv
+```
 
-### v1.0 - 旧実装
-- ボラティリティベース動的手数料（ObservationLibrary 使用）
-- 多層セキュリティ保護（フラッシュローン検知、サーキットブレーカー等）
+スクリプトの挙動:
 
----
+- 参照用の通常プール（fee `500`）から `sqrtPriceX96` を取得
+- hook pool 未初期化なら `initializePool`
+- Permit2 approve 後に `modifyLiquidities`（`MINT_POSITION + SETTLE_PAIR`）
 
-## Environment Note
+## 4) 実行後の確認
 
-- Foundry/forge is available in this project environment.
-- If `forge` is not resolved from `PATH`, run with:
-  `C:\\Users\\skyeu\\.foundry\\bin\\forge.exe` 
+推奨確認項目:
 
-Built with [Claude Code](https://claude.com/claude-code)
+- `cast receipt <txHash> --rpc-url polygon` で `status = 1`
+- `PositionManager.ownerOf(tokenId)` が実行ウォレット
+- Uniswap UI で対象ポジションが `v4` / 対象 hook で表示される
 
+## よくあるエラー
+
+- `Failed to decode private key`
+  - `.env` の `DEPLOYER_PRIVATE_KEY` が不正（`0x` + 64 hex 以外）
+- `insufficient USDC for mint` / `insufficient JPYC for mint`
+  - `USDC_MAX` / `JPYC_MAX` が残高を超えている
+- ガス不足で失敗
+  - `POL` を追加して再実行
+
+## セキュリティ運用メモ
+
+- 秘密鍵とリカバリーフレーズは、チャット・Issue・PR・リポジトリに貼らない
+- `.env` はローカル専用（`.env.example` はサンプルのみ）
+- 本番送信は専用ウォレットを使い、必要最小限の資金だけ入れる
+- `--broadcast` 前に chain / token / hook アドレスを毎回再確認する
+- 本番前に必ず dry-run を実行する
+
+## 参考ドキュメント
+
+- `reports/2026-03-07-prod-deploy-readiness.md`（デプロイ記録）
+- `reports/` 配下のメモは運用ログです。将来の実装と一致しない場合があるため、実行時は本READMEとスクリプトを優先してください。
