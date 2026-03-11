@@ -49,18 +49,13 @@ USDC と JPYC を預けて、LP ポジション（NFT）を作成できます。
 - `script/DeployHook.s.sol`: hook デプロイスクリプト
 - `script/CreateHookPoolAndMint.s.sol`: hook pool 初期化 + LP mint スクリプト
 - `test/DynamicFeeHook.t.sol`: ユニットテスト
+- `test/ForkSwap.t.sol`: Polygon Mainnet フォークテスト（デプロイ済みhookの動作確認）
 
 ## 前提
 
 - Foundry インストール済み
 - Polygon RPC が利用可能
 - 実行ウォレットに `POL`（ガス）と `USDC/JPYC`（LP原資）がある
-
-`forge` が PATH にない環境では以下を使ってください。
-
-```powershell
-C:/Users/skyeu/.foundry/bin/forge.exe
-```
 
 ## セットアップ
 
@@ -143,7 +138,3 @@ forge script script/CreateHookPoolAndMint.s.sol:CreateHookPoolAndMint --rpc-url 
 - `--broadcast` 前に chain / token / hook アドレスを毎回再確認する
 - 本番前に必ず dry-run を実行する
 
-## 参考ドキュメント
-
-- `reports/2026-03-07-prod-deploy-readiness.md`（デプロイ記録）
-- `reports/` 配下のメモは運用ログです。将来の実装と一致しない場合があるため、実行時は本READMEとスクリプトを優先してください。
