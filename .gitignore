@@ -62,6 +62,9 @@ yarn-error.log*
 .windsurf/
 slither-report.latest.json
 
+# Internal development notes
+reports/
+
 # Misc
 nul
 post-mcp-cleanup.md
